@@ -87,9 +87,8 @@ class FanAggressor:
         self.fan_controller = FanController()
         self.nekro_control = NekroFanControl()
         self.running = False
-        self.is_auto_mode = True
-        self.last_cpu_speed = 0
-        self.last_gpu_speed = 0
+        self.last_cpu_speed = -1
+        self.last_gpu_speed = -1
 
     def load_config(self) -> Dict:
         default_config = {
@@ -152,27 +151,21 @@ class FanAggressor:
         else:
             print(f"\nControle Nekro: Não disponível")
 
-    def update_auto_mode(self, temp: float):
-        if self.is_auto_mode:
-            if temp >= 68:
-                self.is_auto_mode = False
-        else:
-            if temp < 62:
-                self.is_auto_mode = True
+    def calculate_fan_speed(self, temp: float, offset: int) -> int:
+        temp_adjusted = temp + (offset * 0.3)
 
-    def get_base_speed_for_temp(self, temp: float) -> int:
-        if temp < 75:
-            return 30
-        elif temp < 85:
-            return 50
+        if temp_adjusted < 55:
+            speed = 0
+        elif temp_adjusted < 65:
+            speed = int(25 + (temp_adjusted - 55) * 1.5)
+        elif temp_adjusted < 75:
+            speed = int(40 + (temp_adjusted - 65) * 2)
+        elif temp_adjusted < 85:
+            speed = int(60 + (temp_adjusted - 75) * 2)
         else:
-            return 80
+            speed = int(80 + (temp_adjusted - 85) * 2)
 
-    def calculate_base_speed(self, temp: float) -> int:
-        self.update_auto_mode(temp)
-        if self.is_auto_mode:
-            return 0
-        return self.get_base_speed_for_temp(temp)
+        return max(0, min(100, speed))
 
     def run_daemon(self):
         self.running = True
@@ -206,12 +199,8 @@ class FanAggressor:
                     temp_source = 'temp1'
                 current_temp = temps.get(temp_source, 60.0)
 
-                base_speed = self.calculate_base_speed(current_temp)
-                base_cpu = base_speed
-                base_gpu = base_speed
-
-                target_cpu = min(100, max(0, base_cpu + self.config['cpu_fan_offset']))
-                target_gpu = min(100, max(0, base_gpu + self.config['gpu_fan_offset']))
+                target_cpu = self.calculate_fan_speed(current_temp, self.config['cpu_fan_offset'])
+                target_gpu = self.calculate_fan_speed(current_temp, self.config['gpu_fan_offset'])
 
                 if target_cpu != self.last_cpu_speed or target_gpu != self.last_gpu_speed:
                     self.nekro_control.set_fan_speed(target_cpu, target_gpu)
