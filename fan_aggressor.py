@@ -6,8 +6,11 @@ import time
 import json
 import argparse
 import signal
+import subprocess
 from pathlib import Path
 from typing import Optional, Dict
+
+NEKROCTL = "/home/fred/nekro-sense/tools/nekroctl.py"
 
 CONFIG_FILE = Path.home() / ".config" / "fan-aggressor" / "config.json"
 PID_FILE = "/var/run/fan-aggressor.pid"
@@ -51,8 +54,8 @@ class FanController:
 
 class ECFanControl:
     EC_ACPI_PATH = "/sys/kernel/debug/ec/ec0/io"
-    FAN1_OFFSET = 0x71
-    FAN2_OFFSET = 0x75
+    FAN1_OFFSET = 0x37
+    FAN2_OFFSET = 0x3A
     FAN_MODE_OFFSET = 0x03
     FAN_MODE_MANUAL = 0x00
 
@@ -90,18 +93,24 @@ class ECFanControl:
         offset = self.FAN1_OFFSET if fan_num == 1 else self.FAN2_OFFSET
         return self.write_ec(offset, duty)
 
-    def get_fan_duty(self, fan_num: int) -> Optional[int]:
-        offset = self.FAN1_OFFSET if fan_num == 1 else self.FAN2_OFFSET
-        return self.read_ec(offset)
+    def set_both_fans(self, cpu_duty: int, gpu_duty: int) -> bool:
+        cpu_duty = max(0, min(100, cpu_duty))
+        gpu_duty = max(0, min(100, gpu_duty))
+        try:
+            subprocess.run([NEKROCTL, "fan", "set", str(cpu_duty), str(gpu_duty)],
+                          check=True, capture_output=True)
+            self.write_ec(self.FAN1_OFFSET, cpu_duty)
+            self.write_ec(self.FAN2_OFFSET, gpu_duty)
+            return True
+        except subprocess.CalledProcessError:
+            return False
 
-    def enable_manual_mode(self) -> bool:
-        current = self.read_ec(self.FAN_MODE_OFFSET)
-        if current is not None:
-            return self.write_ec(self.FAN_MODE_OFFSET, self.FAN_MODE_MANUAL)
-        return False
-
-    def disable_manual_mode(self) -> bool:
-        return self.write_ec(self.FAN_MODE_OFFSET, 0x04)
+    def set_auto_mode(self) -> bool:
+        try:
+            subprocess.run([NEKROCTL, "fan", "auto"], check=True, capture_output=True)
+            return True
+        except subprocess.CalledProcessError:
+            return False
 
 
 class FanAggressor:
@@ -175,15 +184,27 @@ class FanAggressor:
             print(f"\nControle EC: Não disponível")
             print(f"  Para habilitar: sudo modprobe ec_sys write_support=1")
 
-    def calculate_target_duty(self, current_duty: int, offset: int) -> int:
-        if current_duty is None:
-            return 0
+    def calculate_fan_speed(self, temp: float, offset: int) -> int:
+        temp_adjusted = temp + (offset * 0.3)
 
-        target_duty = current_duty + offset
-        return max(0, min(100, target_duty))
+        if temp_adjusted < 50:
+            speed = 0
+        elif temp_adjusted < 60:
+            speed = int(25 + (temp_adjusted - 50) * 1.5)
+        elif temp_adjusted < 70:
+            speed = int(40 + (temp_adjusted - 60) * 2)
+        elif temp_adjusted < 80:
+            speed = int(60 + (temp_adjusted - 70) * 2)
+        else:
+            speed = int(80 + (temp_adjusted - 80) * 2)
+
+        return max(0, min(100, speed))
 
     def run_daemon(self):
         self.running = True
+        self.last_cpu_speed = -1
+        self.last_gpu_speed = -1
+
         signal.signal(signal.SIGTERM, self._signal_handler)
         signal.signal(signal.SIGINT, self._signal_handler)
 
@@ -197,36 +218,33 @@ class FanAggressor:
         print(f"CPU offset: {self.config['cpu_fan_offset']:+d}%")
         print(f"GPU offset: {self.config['gpu_fan_offset']:+d}%")
 
-        if self.config["use_ec_control"] and self.ec_control.ec_available:
-            self.ec_control.enable_manual_mode()
-            print("Modo manual do EC habilitado")
-
         try:
             while self.running:
+                self.config = self.load_config()
+
                 if not self.config["enabled"]:
                     time.sleep(1)
                     continue
 
-                if self.config["use_ec_control"] and self.ec_control.ec_available:
-                    current_cpu_duty = self.ec_control.get_fan_duty(1)
-                    current_gpu_duty = self.ec_control.get_fan_duty(2)
+                if self.ec_control.ec_available:
+                    temps = self.fan_controller.get_temps()
+                    current_temp = temps.get('temp1', 60.0)
 
-                    cpu_duty = self.calculate_target_duty(current_cpu_duty, self.config['cpu_fan_offset'])
-                    gpu_duty = self.calculate_target_duty(current_gpu_duty, self.config['gpu_fan_offset'])
+                    cpu_duty = self.calculate_fan_speed(current_temp, self.config['cpu_fan_offset'])
+                    gpu_duty = self.calculate_fan_speed(current_temp, self.config['gpu_fan_offset'])
 
-                    self.ec_control.enable_manual_mode()
-                    self.ec_control.set_fan_duty(1, cpu_duty)
-                    self.ec_control.set_fan_duty(2, gpu_duty)
+                    if cpu_duty != self.last_cpu_speed or gpu_duty != self.last_gpu_speed:
+                        self.ec_control.set_both_fans(cpu_duty, gpu_duty)
+                        self.last_cpu_speed = cpu_duty
+                        self.last_gpu_speed = gpu_duty
 
                 time.sleep(self.config["poll_interval"])
 
         finally:
-            if self.config["use_ec_control"] and self.ec_control.ec_available:
-                self.ec_control.disable_manual_mode()
-                print("\nModo manual do EC desabilitado")
-
+            self.ec_control.set_auto_mode()
             if os.path.exists(PID_FILE):
                 os.remove(PID_FILE)
+            print("\nFan Aggressor daemon finalizado - modo auto restaurado")
 
     def _signal_handler(self, signum, frame):
         self.running = False
