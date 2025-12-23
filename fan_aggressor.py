@@ -90,6 +90,10 @@ class ECFanControl:
         offset = self.FAN1_OFFSET if fan_num == 1 else self.FAN2_OFFSET
         return self.write_ec(offset, duty)
 
+    def get_fan_duty(self, fan_num: int) -> Optional[int]:
+        offset = self.FAN1_OFFSET if fan_num == 1 else self.FAN2_OFFSET
+        return self.read_ec(offset)
+
     def enable_manual_mode(self) -> bool:
         current = self.read_ec(self.FAN_MODE_OFFSET)
         if current is not None:
@@ -97,7 +101,7 @@ class ECFanControl:
         return False
 
     def disable_manual_mode(self) -> bool:
-        return self.write_ec(self.FAN_MODE_OFFSET, 0x00)
+        return self.write_ec(self.FAN_MODE_OFFSET, 0x04)
 
 
 class FanAggressor:
@@ -171,13 +175,11 @@ class FanAggressor:
             print(f"\nControle EC: Não disponível")
             print(f"  Para habilitar: sudo modprobe ec_sys write_support=1")
 
-    def calculate_target_duty(self, current_rpm: int, offset: int, max_rpm: int = 5000) -> int:
-        if current_rpm == 0:
+    def calculate_target_duty(self, current_duty: int, offset: int) -> int:
+        if current_duty is None:
             return 0
 
-        current_duty = int((current_rpm / max_rpm) * 100)
         target_duty = current_duty + offset
-
         return max(0, min(100, target_duty))
 
     def run_daemon(self):
@@ -205,14 +207,12 @@ class FanAggressor:
                     time.sleep(1)
                     continue
 
-                speeds = self.fan_controller.get_fan_speeds()
-
                 if self.config["use_ec_control"] and self.ec_control.ec_available:
-                    cpu_rpm = speeds.get('fan1', 0)
-                    gpu_rpm = speeds.get('fan2', 0)
+                    current_cpu_duty = self.ec_control.get_fan_duty(1)
+                    current_gpu_duty = self.ec_control.get_fan_duty(2)
 
-                    cpu_duty = self.calculate_target_duty(cpu_rpm, self.config['cpu_fan_offset'])
-                    gpu_duty = self.calculate_target_duty(gpu_rpm, self.config['gpu_fan_offset'])
+                    cpu_duty = self.calculate_target_duty(current_cpu_duty, self.config['cpu_fan_offset'])
+                    gpu_duty = self.calculate_target_duty(current_gpu_duty, self.config['gpu_fan_offset'])
 
                     self.ec_control.enable_manual_mode()
                     self.ec_control.set_fan_duty(1, cpu_duty)

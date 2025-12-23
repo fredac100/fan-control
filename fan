@@ -2,10 +2,30 @@
 
 NEKROCTL="/home/fred/nekro-sense/tools/nekroctl.py"
 
+find_hwmon_device() {
+    for device in /sys/class/hwmon/hwmon*; do
+        if [ -f "$device/name" ]; then
+            name=$(cat "$device/name")
+            if [ "$name" = "acer" ]; then
+                echo "$device"
+                return 0
+            fi
+        fi
+    done
+    echo ""
+    return 1
+}
+
+HWMON_PATH=$(find_hwmon_device)
+
 show_status() {
-    temp=$(awk '{print $1/1000}' /sys/class/hwmon/hwmon7/temp1_input)
-    rpm1=$(cat /sys/class/hwmon/hwmon7/fan1_input)
-    rpm2=$(cat /sys/class/hwmon/hwmon7/fan2_input)
+    if [ -z "$HWMON_PATH" ]; then
+        echo "Erro: Dispositivo Acer hwmon não encontrado"
+        exit 1
+    fi
+    temp=$(awk '{print $1/1000}' "$HWMON_PATH/temp1_input")
+    rpm1=$(cat "$HWMON_PATH/fan1_input")
+    rpm2=$(cat "$HWMON_PATH/fan2_input")
     echo "Temp: ${temp}°C | Fan1: $rpm1 RPM | Fan2: $rpm2 RPM"
 }
 
@@ -15,7 +35,11 @@ case "$1" in
         sleep 2
         show_status
         ;;
-    [0-9]|[0-9][0-9]|100)
+    [0-9]|[1-9][0-9]|100)
+        if [ "$1" -lt 0 ] || [ "$1" -gt 100 ]; then
+            echo "Erro: Valor deve estar entre 0 e 100"
+            exit 1
+        fi
         sudo $NEKROCTL fan set "$1" "$1"
         sleep 2
         show_status

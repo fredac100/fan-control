@@ -87,7 +87,7 @@ class FanAggressor:
         self.fan_controller = FanController()
         self.nekro_control = NekroFanControl()
         self.running = False
-        self.current_mode_is_auto = True
+        self.is_auto_mode = True
         self.last_cpu_speed = 0
         self.last_gpu_speed = 0
 
@@ -152,23 +152,27 @@ class FanAggressor:
         else:
             print(f"\nControle Nekro: Não disponível")
 
-    def calculate_base_speed(self, temp: float) -> int:
-        if self.current_mode_is_auto:
-            if temp < 68:
-                return 0
-            else:
-                self.current_mode_is_auto = False
+    def update_auto_mode(self, temp: float):
+        if self.is_auto_mode:
+            if temp >= 68:
+                self.is_auto_mode = False
         else:
             if temp < 62:
-                self.current_mode_is_auto = True
-                return 0
+                self.is_auto_mode = True
 
+    def get_base_speed_for_temp(self, temp: float) -> int:
         if temp < 75:
             return 30
         elif temp < 85:
             return 50
         else:
             return 80
+
+    def calculate_base_speed(self, temp: float) -> int:
+        self.update_auto_mode(temp)
+        if self.is_auto_mode:
+            return 0
+        return self.get_base_speed_for_temp(temp)
 
     def run_daemon(self):
         self.running = True
@@ -197,10 +201,14 @@ class FanAggressor:
 
                 temps = self.fan_controller.get_temps()
                 temp_source = self.config['temp_source']
+                if temp_source not in temps:
+                    print(f"Aviso: Sensor '{temp_source}' não encontrado, usando temp1")
+                    temp_source = 'temp1'
                 current_temp = temps.get(temp_source, 60.0)
 
-                base_cpu = self.calculate_base_speed(current_temp)
-                base_gpu = self.calculate_base_speed(current_temp)
+                base_speed = self.calculate_base_speed(current_temp)
+                base_cpu = base_speed
+                base_gpu = base_speed
 
                 target_cpu = min(100, max(0, base_cpu + self.config['cpu_fan_offset']))
                 target_gpu = min(100, max(0, base_gpu + self.config['gpu_fan_offset']))
