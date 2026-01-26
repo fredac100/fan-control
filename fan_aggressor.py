@@ -8,203 +8,232 @@ import argparse
 import signal
 import subprocess
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Dict
 
 NEKROCTL = "/home/fred/nekro-sense/tools/nekroctl.py"
-
-CONFIG_FILE = Path.home() / ".config" / "fan-aggressor" / "config.json"
+CONFIG_FILE = Path("/etc/fan-aggressor/config.json")
 PID_FILE = "/var/run/fan-aggressor.pid"
 
-class FanController:
+FAN_RPM_MIN = 0
+FAN_RPM_MAX = 7500
+
+
+class FanMonitor:
     def __init__(self):
         self.hwmon_path = None
-        self.find_hwmon_device()
+        self.coretemp_path = None
+        self._find_hwmon_devices()
 
-    def find_hwmon_device(self):
+    def _find_hwmon_devices(self):
         hwmon_base = Path("/sys/class/hwmon")
+        if not hwmon_base.exists():
+            return
         for device in hwmon_base.iterdir():
             name_file = device / "name"
             if name_file.exists():
                 with open(name_file) as f:
-                    if f.read().strip() == "acer":
+                    name = f.read().strip()
+                    if name == "acer":
                         self.hwmon_path = device
-                        return
-
-        if not self.hwmon_path:
-            raise Exception("Dispositivo Acer hwmon não encontrado")
+                    elif name == "coretemp":
+                        self.coretemp_path = device
 
     def get_fan_speeds(self) -> Dict[str, int]:
         speeds = {}
-        for fan_num in [1, 2]:
-            fan_file = self.hwmon_path / f"fan{fan_num}_input"
-            if fan_file.exists():
-                with open(fan_file) as f:
-                    speeds[f"fan{fan_num}"] = int(f.read().strip())
+        if self.hwmon_path:
+            for fan_num in [1, 2]:
+                fan_file = self.hwmon_path / f"fan{fan_num}_input"
+                if fan_file.exists():
+                    with open(fan_file) as f:
+                        speeds[f"fan{fan_num}"] = int(f.read().strip())
         return speeds
 
     def get_temps(self) -> Dict[str, float]:
         temps = {}
-        for temp_num in [1, 2, 3]:
-            temp_file = self.hwmon_path / f"temp{temp_num}_input"
-            if temp_file.exists():
+        if self.hwmon_path:
+            for temp_num in [1, 2, 3]:
+                temp_file = self.hwmon_path / f"temp{temp_num}_input"
+                if temp_file.exists():
+                    with open(temp_file) as f:
+                        temps[f"temp{temp_num}"] = int(f.read().strip()) / 1000.0
+
+        if self.coretemp_path and not temps:
+            for temp_file in sorted(self.coretemp_path.glob("temp*_input")):
                 with open(temp_file) as f:
-                    temps[f"temp{temp_num}"] = int(f.read().strip()) / 1000.0
+                    temp_name = temp_file.stem.replace("_input", "")
+                    temps[temp_name] = int(f.read().strip()) / 1000.0
         return temps
 
+    def get_max_temp(self) -> float:
+        temps = self.get_temps()
+        return max(temps.values()) if temps else 50.0
 
-class ECFanControl:
-    EC_ACPI_PATH = "/sys/kernel/debug/ec/ec0/io"
-    FAN1_OFFSET = 0x37
-    FAN2_OFFSET = 0x3A
-    FAN_MODE_OFFSET = 0x03
-    FAN_MODE_MANUAL = 0x00
 
-    def __init__(self):
-        self.ec_available = os.path.exists(self.EC_ACPI_PATH)
-        if not self.ec_available:
-            print("Aviso: Acesso ao EC não disponível em /sys/kernel/debug/ec")
-            print("Para habilitar, execute: sudo modprobe ec_sys write_support=1")
+def set_fan_speed(cpu: int, gpu: int) -> bool:
+    cpu = max(0, min(100, cpu))
+    gpu = max(0, min(100, gpu))
+    try:
+        subprocess.run([NEKROCTL, "fan", "set", str(cpu), str(gpu)],
+                      check=True, capture_output=True)
+        return True
+    except subprocess.CalledProcessError:
+        return False
 
-    def read_ec(self, offset: int) -> Optional[int]:
-        if not self.ec_available:
-            return None
-        try:
-            with open(self.EC_ACPI_PATH, 'rb') as f:
-                f.seek(offset)
-                return ord(f.read(1))
-        except (IOError, PermissionError):
-            return None
 
-    def write_ec(self, offset: int, value: int) -> bool:
-        if not self.ec_available:
-            return False
-        try:
-            with open(self.EC_ACPI_PATH, 'r+b') as f:
-                f.seek(offset)
-                f.write(bytes([value]))
-                f.flush()
-            return True
-        except (IOError, PermissionError) as e:
-            print(f"Erro ao escrever no EC: {e}")
-            return False
+def set_fan_auto() -> bool:
+    try:
+        subprocess.run([NEKROCTL, "fan", "auto"], check=True, capture_output=True)
+        return True
+    except subprocess.CalledProcessError:
+        return False
 
-    def set_fan_duty(self, fan_num: int, duty: int) -> bool:
-        duty = max(0, min(100, duty))
-        offset = self.FAN1_OFFSET if fan_num == 1 else self.FAN2_OFFSET
-        return self.write_ec(offset, duty)
 
-    def set_both_fans(self, cpu_duty: int, gpu_duty: int) -> bool:
-        cpu_duty = max(0, min(100, cpu_duty))
-        gpu_duty = max(0, min(100, gpu_duty))
-        try:
-            subprocess.run([NEKROCTL, "fan", "set", str(cpu_duty), str(gpu_duty)],
-                          check=True, capture_output=True)
-            self.write_ec(self.FAN1_OFFSET, cpu_duty)
-            self.write_ec(self.FAN2_OFFSET, gpu_duty)
-            return True
-        except subprocess.CalledProcessError:
-            return False
+def get_fan_speed() -> tuple:
+    try:
+        result = subprocess.run([NEKROCTL, "fan", "get"],
+                               capture_output=True, text=True, check=True)
+        parts = result.stdout.strip().split(",")
+        if len(parts) == 2:
+            return int(parts[0]), int(parts[1])
+    except:
+        pass
+    return None, None
 
-    def set_auto_mode(self) -> bool:
-        try:
-            subprocess.run([NEKROCTL, "fan", "auto"], check=True, capture_output=True)
-            return True
-        except subprocess.CalledProcessError:
-            return False
+
+def temp_to_duty(temp: float) -> int:
+    if temp < 45:
+        return 0
+    elif temp < 55:
+        return int((temp - 45) * 3)
+    elif temp < 65:
+        return int(30 + (temp - 55) * 3)
+    elif temp < 75:
+        return int(60 + (temp - 65) * 2)
+    elif temp < 85:
+        return int(80 + (temp - 75) * 2)
+    else:
+        return 100
+
+
+def rpm_to_duty(rpm: int) -> int:
+    if rpm <= FAN_RPM_MIN:
+        return 0
+    if rpm >= FAN_RPM_MAX:
+        return 100
+    return int((rpm - FAN_RPM_MIN) / (FAN_RPM_MAX - FAN_RPM_MIN) * 100)
 
 
 class FanAggressor:
     def __init__(self, config_path: Path = CONFIG_FILE):
         self.config_path = config_path
-        self.config = self.load_config()
-        self.fan_controller = FanController()
-        self.ec_control = ECFanControl()
+        self.config = self._load_config()
+        self.monitor = FanMonitor()
         self.running = False
-        self.baseline_map = {}
+        self.last_cpu = -1
+        self.last_gpu = -1
+        self.is_boosting = False
 
-    def load_config(self) -> Dict:
-        default_config = {
+    def _load_config(self) -> Dict:
+        default = {
             "cpu_fan_offset": 0,
             "gpu_fan_offset": 0,
             "enabled": False,
-            "poll_interval": 0.15,
-            "use_ec_control": True
+            "poll_interval": 1.0,
+            "hybrid_mode": True,
+            "temp_threshold_engage": 70,
+            "temp_threshold_disengage": 65
         }
-
         if self.config_path.exists():
             try:
                 with open(self.config_path) as f:
                     loaded = json.load(f)
-                    default_config.update(loaded)
+                    for key in default.keys():
+                        if key in loaded:
+                            default[key] = loaded[key]
             except json.JSONDecodeError:
                 pass
+        return default
 
-        return default_config
-
-    def save_config(self):
+    def _save_config(self):
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.config_path, 'w') as f:
             json.dump(self.config, f, indent=2)
 
     def set_offset(self, fan: str, offset: int):
-        if fan == "cpu":
+        offset = max(-100, min(100, offset))
+        if fan in ("cpu", "both"):
             self.config["cpu_fan_offset"] = offset
-        elif fan == "gpu":
+        if fan in ("gpu", "both"):
             self.config["gpu_fan_offset"] = offset
-        elif fan == "both":
-            self.config["cpu_fan_offset"] = offset
-            self.config["gpu_fan_offset"] = offset
-        self.save_config()
+        self._save_config()
 
     def enable(self):
         self.config["enabled"] = True
-        self.save_config()
+        self._save_config()
 
     def disable(self):
         self.config["enabled"] = False
-        self.save_config()
+        self._save_config()
+        set_fan_auto()
 
     def status(self):
-        speeds = self.fan_controller.get_fan_speeds()
-        temps = self.fan_controller.get_temps()
+        speeds = self.monitor.get_fan_speeds()
+        temps = self.monitor.get_temps()
+        fan_cpu, fan_gpu = get_fan_speed()
 
-        print(f"Status: {'Habilitado' if self.config['enabled'] else 'Desabilitado'}")
-        print(f"CPU Fan Offset: {self.config['cpu_fan_offset']:+d}%")
-        print(f"GPU Fan Offset: {self.config['gpu_fan_offset']:+d}%")
-        print(f"\nVelocidades atuais:")
-        print(f"  Fan 1 (CPU): {speeds.get('fan1', 0)} RPM")
-        print(f"  Fan 2 (GPU): {speeds.get('fan2', 0)} RPM")
-        print(f"\nTemperaturas:")
-        for temp_name, temp_val in temps.items():
-            print(f"  {temp_name}: {temp_val:.1f}°C")
+        print(f"Status: {'ATIVO' if self.config['enabled'] else 'INATIVO'}")
+        hybrid = self.config.get('hybrid_mode', True)
+        print(f"Modo: {'HIBRIDO' if hybrid else 'CURVA FIXA'}")
+        print(f"\nOffsets configurados:")
+        print(f"  CPU: {self.config['cpu_fan_offset']:+d}%")
+        print(f"  GPU: {self.config['gpu_fan_offset']:+d}%")
 
-        if self.ec_control.ec_available:
-            print(f"\nControle EC: Disponível")
-        else:
-            print(f"\nControle EC: Não disponível")
-            print(f"  Para habilitar: sudo modprobe ec_sys write_support=1")
+        if hybrid:
+            print(f"\nThresholds (modo hibrido):")
+            print(f"  Ativar boost: >= {self.config.get('temp_threshold_engage', 70)}°C")
+            print(f"  Voltar auto:  <  {self.config.get('temp_threshold_disengage', 65)}°C")
 
-    def calculate_fan_speed(self, temp: float, offset: int) -> int:
-        temp_adjusted = temp + (offset * 0.3)
+        if fan_cpu is not None:
+            print(f"\nDuty atual (nekroctl):")
+            print(f"  CPU: {fan_cpu}% {'(auto)' if fan_cpu == 0 else ''}")
+            print(f"  GPU: {fan_gpu}% {'(auto)' if fan_gpu == 0 else ''}")
 
-        if temp_adjusted < 50:
-            speed = 0
-        elif temp_adjusted < 60:
-            speed = int(25 + (temp_adjusted - 50) * 1.5)
-        elif temp_adjusted < 70:
-            speed = int(40 + (temp_adjusted - 60) * 2)
-        elif temp_adjusted < 80:
-            speed = int(60 + (temp_adjusted - 70) * 2)
-        else:
-            speed = int(80 + (temp_adjusted - 80) * 2)
+        if speeds:
+            print(f"\nVelocidades:")
+            fan1_rpm = speeds.get('fan1', 0)
+            fan2_rpm = speeds.get('fan2', 0)
+            print(f"  Fan 1 (CPU): {fan1_rpm} RPM (~{rpm_to_duty(fan1_rpm)}% estimado)")
+            print(f"  Fan 2 (GPU): {fan2_rpm} RPM (~{rpm_to_duty(fan2_rpm)}% estimado)")
 
-        return max(0, min(100, speed))
+        if temps:
+            print(f"\nTemperaturas:")
+            for name, val in temps.items():
+                print(f"  {name}: {val:.1f}°C")
+            max_temp = self.monitor.get_max_temp()
+            print(f"  Max: {max_temp:.1f}°C")
 
-    def run_daemon(self):
+            if hybrid and speeds:
+                fan1_rpm = speeds.get('fan1', 0)
+                fan2_rpm = speeds.get('fan2', 0)
+                base_cpu = rpm_to_duty(fan1_rpm)
+                base_gpu = rpm_to_duty(fan2_rpm)
+                print(f"\nModo hibrido (baseado no RPM atual):")
+                print(f"  CPU: {base_cpu}% + {self.config['cpu_fan_offset']:+d}% = {min(100, base_cpu + self.config['cpu_fan_offset'])}%")
+                print(f"  GPU: {base_gpu}% + {self.config['gpu_fan_offset']:+d}% = {min(100, base_gpu + self.config['gpu_fan_offset'])}%")
+                if max_temp >= self.config.get('temp_threshold_engage', 70):
+                    print(f"  -> Boost ATIVARIA (temp {max_temp:.0f}°C >= {self.config.get('temp_threshold_engage', 70)}°C)")
+                else:
+                    print(f"  -> Em modo AUTO (temp {max_temp:.0f}°C < {self.config.get('temp_threshold_engage', 70)}°C)")
+            else:
+                base_duty = temp_to_duty(max_temp)
+                print(f"\nCurva fixa para {max_temp:.0f}°C: {base_duty}%")
+                print(f"Com offset +{self.config['cpu_fan_offset']}%: {min(100, base_duty + self.config['cpu_fan_offset'])}%")
+
+    def daemon(self):
         self.running = True
-        self.last_cpu_speed = -1
-        self.last_gpu_speed = -1
-
+        self.is_boosting = False
+        self.base_rpm_cpu = 0
+        self.base_rpm_gpu = 0
         signal.signal(signal.SIGTERM, self._signal_handler)
         signal.signal(signal.SIGINT, self._signal_handler)
 
@@ -212,39 +241,90 @@ class FanAggressor:
             with open(PID_FILE, 'w') as f:
                 f.write(str(os.getpid()))
         except PermissionError:
-            print("Aviso: Não foi possível criar arquivo PID. Execute com sudo.")
+            pass
 
-        print("Fan Aggressor daemon iniciado")
+        hybrid = self.config.get('hybrid_mode', True)
+        print(f"Fan Aggressor iniciado ({'HIBRIDO' if hybrid else 'CURVA FIXA'})")
         print(f"CPU offset: {self.config['cpu_fan_offset']:+d}%")
         print(f"GPU offset: {self.config['gpu_fan_offset']:+d}%")
+        if hybrid:
+            print(f"Threshold engage: {self.config.get('temp_threshold_engage', 70)}°C")
+            print(f"Threshold disengage: {self.config.get('temp_threshold_disengage', 65)}°C")
+            set_fan_auto()
+            print("Iniciando em modo AUTO...")
+            time.sleep(2)
 
         try:
             while self.running:
-                self.config = self.load_config()
+                self.config = self._load_config()
+                hybrid = self.config.get('hybrid_mode', True)
 
                 if not self.config["enabled"]:
+                    if self.last_cpu != -1 or self.is_boosting:
+                        set_fan_auto()
+                        self.last_cpu = -1
+                        self.last_gpu = -1
+                        self.is_boosting = False
                     time.sleep(1)
                     continue
 
-                if self.ec_control.ec_available:
-                    temps = self.fan_controller.get_temps()
-                    current_temp = temps.get('temp1', 60.0)
+                temp = self.monitor.get_max_temp()
+                cpu_offset = self.config["cpu_fan_offset"]
+                gpu_offset = self.config["gpu_fan_offset"]
+                threshold_engage = self.config.get('temp_threshold_engage', 70)
+                threshold_disengage = self.config.get('temp_threshold_disengage', 65)
 
-                    cpu_duty = self.calculate_fan_speed(current_temp, self.config['cpu_fan_offset'])
-                    gpu_duty = self.calculate_fan_speed(current_temp, self.config['gpu_fan_offset'])
+                if hybrid:
+                    if not self.is_boosting and temp >= threshold_engage:
+                        speeds = self.monitor.get_fan_speeds()
+                        self.base_rpm_cpu = speeds.get('fan1', 0)
+                        self.base_rpm_gpu = speeds.get('fan2', 0)
+                        self.is_boosting = True
+                        base_cpu = rpm_to_duty(self.base_rpm_cpu)
+                        base_gpu = rpm_to_duty(self.base_rpm_gpu)
+                        print(f"[{temp:.0f}°C] Boost ATIVADO (base: CPU {base_cpu}%, GPU {base_gpu}%)")
+                    elif self.is_boosting and temp < threshold_disengage:
+                        self.is_boosting = False
+                        self.base_rpm_cpu = 0
+                        self.base_rpm_gpu = 0
+                        set_fan_auto()
+                        self.last_cpu = -1
+                        self.last_gpu = -1
+                        print(f"[{temp:.0f}°C] Voltando ao AUTO")
+                        time.sleep(self.config["poll_interval"])
+                        continue
 
-                    if cpu_duty != self.last_cpu_speed or gpu_duty != self.last_gpu_speed:
-                        self.ec_control.set_both_fans(cpu_duty, gpu_duty)
-                        self.last_cpu_speed = cpu_duty
-                        self.last_gpu_speed = gpu_duty
+                    if self.is_boosting:
+                        base_cpu = rpm_to_duty(self.base_rpm_cpu)
+                        base_gpu = rpm_to_duty(self.base_rpm_gpu)
+                        new_cpu = max(0, min(100, base_cpu + cpu_offset))
+                        new_gpu = max(0, min(100, base_gpu + gpu_offset))
+
+                        if new_cpu != self.last_cpu or new_gpu != self.last_gpu:
+                            set_fan_speed(new_cpu, new_gpu)
+                            self.last_cpu = new_cpu
+                            self.last_gpu = new_gpu
+                            print(f"[{temp:.0f}°C] Fans: CPU {new_cpu}% ({base_cpu}%+{cpu_offset}), GPU {new_gpu}% ({base_gpu}%+{gpu_offset})")
+                    else:
+                        time.sleep(self.config["poll_interval"])
+                        continue
+                else:
+                    base_duty = temp_to_duty(temp)
+                    new_cpu = max(0, min(100, base_duty + cpu_offset))
+                    new_gpu = max(0, min(100, base_duty + gpu_offset))
+
+                    if new_cpu != self.last_cpu or new_gpu != self.last_gpu:
+                        set_fan_speed(new_cpu, new_gpu)
+                        self.last_cpu = new_cpu
+                        self.last_gpu = new_gpu
 
                 time.sleep(self.config["poll_interval"])
 
         finally:
-            self.ec_control.set_auto_mode()
+            set_fan_auto()
             if os.path.exists(PID_FILE):
                 os.remove(PID_FILE)
-            print("\nFan Aggressor daemon finalizado - modo auto restaurado")
+            print("\nDaemon finalizado - modo auto restaurado")
 
     def _signal_handler(self, signum, frame):
         self.running = False
@@ -252,47 +332,79 @@ class FanAggressor:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Fan Aggressor - Controle de agressividade dos ventiladores"
-    )
+        description="Fan Aggressor - Controle de agressividade dos ventiladores",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Exemplos:
+  fan_aggressor status              Mostra status atual
+  fan_aggressor set cpu +20         Aumenta 20% sobre curva base
+  fan_aggressor set gpu -10         Diminui 10% sobre curva base
+  fan_aggressor set both +15        Define ambos os fans
+  fan_aggressor enable              Ativa controle
+  fan_aggressor disable             Desativa (volta ao auto)
+  fan_aggressor daemon              Inicia daemon (requer root)
 
-    subparsers = parser.add_subparsers(dest='command', help='Comandos disponíveis')
+MODO HIBRIDO (padrao):
+  - Sistema fica em AUTO ate temperatura >= threshold_engage (70C)
+  - Quando ativa, le RPM atual e adiciona offset configurado
+  - Volta ao AUTO quando temp < threshold_disengage (65C)
+  - Nao substitui a curva do sistema, apenas adiciona boost quando precisa
 
-    set_parser = subparsers.add_parser('set', help='Define offset de ventilador')
-    set_parser.add_argument('fan', choices=['cpu', 'gpu', 'both'], help='Qual ventilador')
-    set_parser.add_argument('offset', type=int, help='Offset em porcentagem (-100 a +100)')
+  Exemplo com RPM atual = 3000 (~55%) e offset = +10%:
+    Final: 65%
 
-    subparsers.add_parser('enable', help='Habilita controle')
-    subparsers.add_parser('disable', help='Desabilita controle')
-    subparsers.add_parser('status', help='Mostra status atual')
-    subparsers.add_parser('daemon', help='Executa como daemon')
+MODO CURVA FIXA (hybrid_mode=false no config):
+  Curva base (similar ao fabricante):
+    <45C  ->  0%
+    45-55C -> 0-30%
+    55-65C -> 30-60%
+    65-75C -> 60-80%
+    75-85C -> 80-100%
+    >85C  -> 100%
+
+Config: /etc/fan-aggressor/config.json
+  hybrid_mode: true/false
+  temp_threshold_engage: 70 (graus para ativar boost)
+  temp_threshold_disengage: 65 (graus para voltar ao auto)
+""")
+
+    sub = parser.add_subparsers(dest="cmd", metavar="COMANDO")
+
+    p_set = sub.add_parser("set", help="Define offset de ventilador")
+    p_set.add_argument("fan", choices=["cpu", "gpu", "both"], help="Ventilador alvo")
+    p_set.add_argument("offset", type=int, help="Offset (-100 a +100)")
+
+    sub.add_parser("enable", help="Ativa controle")
+    sub.add_parser("disable", help="Desativa controle")
+    sub.add_parser("status", help="Mostra status")
+    sub.add_parser("daemon", help="Executa daemon (root)")
 
     args = parser.parse_args()
-
     aggressor = FanAggressor()
 
-    if args.command == 'set':
-        if args.offset < -100 or args.offset > 100:
+    if args.cmd == "set":
+        if not -100 <= args.offset <= 100:
             print("Erro: Offset deve estar entre -100 e +100")
             sys.exit(1)
         aggressor.set_offset(args.fan, args.offset)
-        print(f"Offset configurado: {args.fan} = {args.offset:+d}%")
+        print(f"Offset {args.fan}: {args.offset:+d}%")
 
-    elif args.command == 'enable':
+    elif args.cmd == "enable":
         aggressor.enable()
-        print("Fan Aggressor habilitado")
+        print("Controle ativado")
 
-    elif args.command == 'disable':
+    elif args.cmd == "disable":
         aggressor.disable()
-        print("Fan Aggressor desabilitado")
+        print("Controle desativado")
 
-    elif args.command == 'status':
+    elif args.cmd == "status":
         aggressor.status()
 
-    elif args.command == 'daemon':
+    elif args.cmd == "daemon":
         if os.geteuid() != 0:
-            print("Erro: Daemon deve ser executado como root")
+            print("Erro: Daemon requer root")
             sys.exit(1)
-        aggressor.run_daemon()
+        aggressor.daemon()
 
     else:
         parser.print_help()
