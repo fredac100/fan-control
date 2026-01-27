@@ -66,7 +66,7 @@ def get_fan_speed() -> tuple:
         parts = result.stdout.strip().split(",")
         if len(parts) == 2:
             return int(parts[0]), int(parts[1])
-    except:
+    except (subprocess.CalledProcessError, ValueError, IndexError, OSError):
         pass
     return None, None
 
