@@ -13,6 +13,7 @@ from typing import Dict
 NEKROCTL = "/home/fred/nekro-sense/tools/nekroctl.py"
 CONFIG_FILE = Path("/etc/fan-aggressor/config.json")
 PID_FILE = "/var/run/fan-aggressor.pid"
+STATE_FILE = Path("/var/run/fan-aggressor.state")
 
 FAN_RPM_MIN = 0
 FAN_RPM_MAX = 7500
@@ -86,6 +87,29 @@ def set_fan_auto() -> bool:
         return True
     except subprocess.CalledProcessError:
         return False
+
+
+def write_state(active: bool, cpu_offset: int = 0, gpu_offset: int = 0, base_cpu: int = 0, base_gpu: int = 0):
+    try:
+        state = {
+            "active": active,
+            "cpu_offset": cpu_offset,
+            "gpu_offset": gpu_offset,
+            "base_cpu": base_cpu,
+            "base_gpu": base_gpu
+        }
+        with open(STATE_FILE, 'w') as f:
+            json.dump(state, f)
+    except PermissionError:
+        pass
+
+
+def clear_state():
+    try:
+        if STATE_FILE.exists():
+            STATE_FILE.unlink()
+    except PermissionError:
+        pass
 
 
 def get_fan_speed() -> tuple:
@@ -232,8 +256,6 @@ class FanAggressor:
     def daemon(self):
         self.running = True
         self.is_boosting = False
-        self.base_rpm_cpu = 0
-        self.base_rpm_gpu = 0
         signal.signal(signal.SIGTERM, self._signal_handler)
         signal.signal(signal.SIGINT, self._signal_handler)
 
@@ -251,6 +273,7 @@ class FanAggressor:
             print(f"Threshold engage: {self.config.get('temp_threshold_engage', 70)}°C")
             print(f"Threshold disengage: {self.config.get('temp_threshold_disengage', 65)}°C")
             set_fan_auto()
+            clear_state()
             print("Iniciando em modo AUTO...")
             time.sleep(2)
 
@@ -262,6 +285,7 @@ class FanAggressor:
                 if not self.config["enabled"]:
                     if self.last_cpu != -1 or self.is_boosting:
                         set_fan_auto()
+                        clear_state()
                         self.last_cpu = -1
                         self.last_gpu = -1
                         self.is_boosting = False
@@ -276,18 +300,12 @@ class FanAggressor:
 
                 if hybrid:
                     if not self.is_boosting and temp >= threshold_engage:
-                        speeds = self.monitor.get_fan_speeds()
-                        self.base_rpm_cpu = speeds.get('fan1', 0)
-                        self.base_rpm_gpu = speeds.get('fan2', 0)
                         self.is_boosting = True
-                        base_cpu = rpm_to_duty(self.base_rpm_cpu)
-                        base_gpu = rpm_to_duty(self.base_rpm_gpu)
-                        print(f"[{temp:.0f}°C] Boost ATIVADO (base: CPU {base_cpu}%, GPU {base_gpu}%)")
+                        print(f"[{temp:.0f}°C] Boost ATIVADO")
                     elif self.is_boosting and temp < threshold_disengage:
                         self.is_boosting = False
-                        self.base_rpm_cpu = 0
-                        self.base_rpm_gpu = 0
                         set_fan_auto()
+                        clear_state()
                         self.last_cpu = -1
                         self.last_gpu = -1
                         print(f"[{temp:.0f}°C] Voltando ao AUTO")
@@ -295,16 +313,16 @@ class FanAggressor:
                         continue
 
                     if self.is_boosting:
-                        base_cpu = rpm_to_duty(self.base_rpm_cpu)
-                        base_gpu = rpm_to_duty(self.base_rpm_gpu)
-                        new_cpu = max(0, min(100, base_cpu + cpu_offset))
-                        new_gpu = max(0, min(100, base_gpu + gpu_offset))
+                        base_duty = temp_to_duty(temp)
+                        new_cpu = max(0, min(100, base_duty + cpu_offset))
+                        new_gpu = max(0, min(100, base_duty + gpu_offset))
 
                         if new_cpu != self.last_cpu or new_gpu != self.last_gpu:
                             set_fan_speed(new_cpu, new_gpu)
+                            write_state(True, cpu_offset, gpu_offset, base_duty, base_duty)
                             self.last_cpu = new_cpu
                             self.last_gpu = new_gpu
-                            print(f"[{temp:.0f}°C] Fans: CPU {new_cpu}% ({base_cpu}%+{cpu_offset}), GPU {new_gpu}% ({base_gpu}%+{gpu_offset})")
+                            print(f"[{temp:.0f}°C] Fans: CPU {new_cpu}% ({base_duty}%+{cpu_offset}), GPU {new_gpu}% ({base_duty}%+{gpu_offset})")
                     else:
                         time.sleep(self.config["poll_interval"])
                         continue
@@ -315,6 +333,7 @@ class FanAggressor:
 
                     if new_cpu != self.last_cpu or new_gpu != self.last_gpu:
                         set_fan_speed(new_cpu, new_gpu)
+                        write_state(True, cpu_offset, gpu_offset, base_duty, base_duty)
                         self.last_cpu = new_cpu
                         self.last_gpu = new_gpu
 
@@ -322,6 +341,7 @@ class FanAggressor:
 
         finally:
             set_fan_auto()
+            clear_state()
             if os.path.exists(PID_FILE):
                 os.remove(PID_FILE)
             print("\nDaemon finalizado - modo auto restaurado")
