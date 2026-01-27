@@ -45,8 +45,11 @@ class FanMonitor:
             for fan_num in [1, 2]:
                 fan_file = self.hwmon_path / f"fan{fan_num}_input"
                 if fan_file.exists():
-                    with open(fan_file) as f:
-                        speeds[f"fan{fan_num}"] = int(f.read().strip())
+                    try:
+                        with open(fan_file) as f:
+                            speeds[f"fan{fan_num}"] = int(f.read().strip())
+                    except (ValueError, PermissionError, OSError):
+                        pass
         return speeds
 
     def get_temps(self) -> Dict[str, float]:
@@ -55,14 +58,20 @@ class FanMonitor:
             for temp_num in [1, 2, 3]:
                 temp_file = self.hwmon_path / f"temp{temp_num}_input"
                 if temp_file.exists():
-                    with open(temp_file) as f:
-                        temps[f"temp{temp_num}"] = int(f.read().strip()) / 1000.0
+                    try:
+                        with open(temp_file) as f:
+                            temps[f"temp{temp_num}"] = int(f.read().strip()) / 1000.0
+                    except (ValueError, PermissionError, OSError):
+                        pass
 
         if self.coretemp_path and not temps:
             for temp_file in sorted(self.coretemp_path.glob("temp*_input")):
-                with open(temp_file) as f:
-                    temp_name = temp_file.stem.replace("_input", "")
-                    temps[temp_name] = int(f.read().strip()) / 1000.0
+                try:
+                    with open(temp_file) as f:
+                        temp_name = temp_file.stem.replace("_input", "")
+                        temps[temp_name] = int(f.read().strip()) / 1000.0
+                except (ValueError, PermissionError, OSError):
+                    pass
         return temps
 
     def get_max_temp(self) -> float:
@@ -217,7 +226,7 @@ class FanAggressor:
             print(f"  Ativar boost: >= {self.config.get('temp_threshold_engage', 70)}°C")
             print(f"  Voltar auto:  <  {self.config.get('temp_threshold_disengage', 65)}°C")
 
-        if fan_cpu is not None:
+        if fan_cpu is not None and fan_gpu is not None:
             print(f"\nDuty atual (nekroctl):")
             print(f"  CPU: {fan_cpu}% {'(auto)' if fan_cpu == 0 else ''}")
             print(f"  GPU: {fan_gpu}% {'(auto)' if fan_gpu == 0 else ''}")
@@ -297,6 +306,8 @@ class FanAggressor:
                 gpu_offset = self.config["gpu_fan_offset"]
                 threshold_engage = self.config.get('temp_threshold_engage', 70)
                 threshold_disengage = self.config.get('temp_threshold_disengage', 65)
+                if threshold_disengage >= threshold_engage:
+                    threshold_disengage = threshold_engage - 5
 
                 if hybrid:
                     if not self.is_boosting and temp >= threshold_engage:
