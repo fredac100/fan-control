@@ -2,6 +2,15 @@
 
 Controle dinâmico de ventiladores para notebooks Acer no Linux, com offset configurável sobre a curva de temperatura.
 
+## Compatibilidade
+
+Este projeto funciona **exclusivamente** com notebooks Acer que possuem interface WMI para controle de fans:
+
+- **Acer Predator** (Helios, Triton, etc.)
+- **Acer Nitro** (Nitro 5, Nitro 7, etc.)
+
+Requer o módulo kernel [nekro-sense](https://github.com/fredac100/nekro-sense) instalado e funcionando.
+
 ## Funcionalidades
 
 - **Curva dinâmica de temperatura** - Velocidade dos fans varia conforme a temperatura
