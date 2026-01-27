@@ -125,16 +125,16 @@ def get_fan_speed() -> tuple:
 
 
 def temp_to_duty(temp: float) -> int:
-    if temp < 45:
+    if temp < 50:
         return 0
-    elif temp < 55:
-        return int((temp - 45) * 3)
-    elif temp < 65:
-        return int(30 + (temp - 55) * 3)
-    elif temp < 75:
-        return int(60 + (temp - 65) * 2)
-    elif temp < 85:
-        return int(80 + (temp - 75) * 2)
+    elif temp < 60:
+        return int((temp - 50) * 2)
+    elif temp < 70:
+        return int(20 + (temp - 60) * 2.5)
+    elif temp < 80:
+        return int(45 + (temp - 70) * 3)
+    elif temp < 90:
+        return int(75 + (temp - 80) * 2.5)
     else:
         return 100
 
