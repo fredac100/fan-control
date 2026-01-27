@@ -8,6 +8,7 @@ import argparse
 import signal
 import subprocess
 from pathlib import Path
+from typing import Dict
 
 from fan_monitor import FanMonitor, rpm_to_percent as rpm_to_duty
 
