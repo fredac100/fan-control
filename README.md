@@ -1,129 +1,201 @@
 # Fan Aggressor
 
-Aplicação para controlar a agressividade dos ventiladores de notebooks Acer no Linux.
+Controle dinâmico de ventiladores para notebooks Acer no Linux, com offset configurável sobre a curva de temperatura.
 
 ## Funcionalidades
 
-- Controle de offset de velocidade para CPU e GPU fans
-- Mantém a variação dinâmica do controle automático
-- Adiciona ou remove porcentagem de potência
-- Interface CLI simples
-- Serviço systemd para execução automática
-- Suporte a controle via Embedded Controller (EC)
+- **Curva dinâmica de temperatura** - Velocidade dos fans varia conforme a temperatura
+- **Offset configurável** - Adiciona ou remove porcentagem sobre a curva base
+- **Modo Híbrido** - Ativa boost apenas quando temperatura atinge threshold
+- **GUI GTK4** - Interface gráfica moderna com libadwaita
+- **CLI completa** - Controle via linha de comando
+- **Integração com nekro-sense** - Funciona em conjunto com o módulo kernel
 
 ## Como Funciona
 
-A aplicação monitora continuamente a velocidade dos ventiladores e aplica um offset configurável. Por exemplo:
+### Modo Híbrido (Recomendado)
 
-- Se o sistema define o fan em 50% e você configurou +10%:
-  - O fan rodará a 60%
-- Se o sistema reduz para 30% e você tem +10%:
-  - O fan rodará a 40%
+1. Sistema fica no **modo AUTO** enquanto temperatura está baixa
+2. Quando temperatura atinge o **threshold de engage** (ex: 60°C), ativa o boost
+3. Aplica **curva dinâmica + offset** configurado
+4. Quando temperatura cai abaixo do **threshold de disengage** (ex: 55°C), volta ao AUTO
 
-Isso mantém a curva de ventilação dinâmica do fabricante, mas com mais (ou menos) agressividade.
+### Curva de Temperatura Base
+
+| Temperatura | Velocidade Base |
+|-------------|-----------------|
+| < 50°C      | 0%              |
+| 50-60°C     | 0-20%           |
+| 60-70°C     | 20-45%          |
+| 70-80°C     | 45-75%          |
+| 80-90°C     | 75-100%         |
+| > 90°C      | 100%            |
+
+### Exemplo com Offset +15%
+
+| Temperatura | Base | + Offset | Final |
+|-------------|------|----------|-------|
+| 55°C        | 10%  | +15%     | 25%   |
+| 65°C        | 32%  | +15%     | 47%   |
+| 75°C        | 60%  | +15%     | 75%   |
 
 ## Requisitos
 
-- Linux com kernel 3.17+
-- lm-sensors instalado
-- Módulo kernel ec_sys
-- Permissões root para controle de hardware
+- Linux com kernel 5.x+
+- [nekro-sense](https://github.com/fredac100/nekro-sense) instalado e funcionando
+- Python 3.8+
+- GTK4 e libadwaita (para GUI)
 
 ## Instalação
 
 ```bash
-cd /home/fred/fan-control
+git clone https://github.com/fredac100/fan-control.git
+cd fan-control
 chmod +x install.sh
 sudo ./install.sh
 ```
 
-## Uso Básico
+### Instalar GUI
 
-### Ver status atual
+```bash
+./install_gui.sh
+```
+
+Isso instala o ícone e adiciona entrada no menu de aplicações.
+
+## Uso
+
+### Interface Gráfica
+
+```bash
+./fan_aggressor_gui.py
+```
+
+Ou procure "Fan Aggressor" no menu de aplicações.
+
+### Linha de Comando
+
+#### Ver status
 
 ```bash
 fan_aggressor status
 ```
 
-### Configurar offset
+#### Configurar offset
 
 ```bash
-fan_aggressor set cpu +10
-fan_aggressor set gpu +15
-fan_aggressor set both +10
+# Aumentar agressividade
+fan_aggressor set both +15
+
+# CPU e GPU separados
+fan_aggressor set cpu +20
+fan_aggressor set gpu +10
+
+# Reduzir ruído (cuidado com temperaturas!)
+fan_aggressor set both -10
 ```
 
-Valores válidos: -100 a +100 (porcentagem)
-
-### Habilitar/Desabilitar
+#### Habilitar/Desabilitar
 
 ```bash
 fan_aggressor enable
 fan_aggressor disable
 ```
 
-### Iniciar serviço
+### Serviço Systemd
 
 ```bash
+# Iniciar
 sudo systemctl start fan-aggressor
+
+# Habilitar no boot
 sudo systemctl enable fan-aggressor
+
+# Ver logs
+journalctl -u fan-aggressor -f
 ```
 
-### Ver logs
+## Configuração
 
-```bash
-journalctl -u fan-aggressor -f
+Arquivo: `/etc/fan-aggressor/config.json`
+
+```json
+{
+  "cpu_fan_offset": 15,
+  "gpu_fan_offset": 15,
+  "enabled": true,
+  "poll_interval": 1.0,
+  "hybrid_mode": true,
+  "temp_threshold_engage": 60,
+  "temp_threshold_disengage": 55
+}
+```
+
+| Parâmetro | Descrição |
+|-----------|-----------|
+| `cpu_fan_offset` | Offset para CPU (-100 a +100) |
+| `gpu_fan_offset` | Offset para GPU (-100 a +100) |
+| `enabled` | Ativa/desativa o controle |
+| `poll_interval` | Intervalo de atualização em segundos |
+| `hybrid_mode` | Se true, usa thresholds; se false, controla sempre |
+| `temp_threshold_engage` | Temperatura para ativar boost |
+| `temp_threshold_disengage` | Temperatura para voltar ao auto |
+
+## Integração com Nekro-Sense
+
+O Fan Aggressor funciona em conjunto com o nekro-sense:
+
+- Usa `nekroctl` para controlar os fans via módulo kernel
+- O GUI do nekro-sense detecta quando o aggressor está ativo
+- Quando ativo, mostra o status do boost e desabilita controles manuais
+
+## Arquitetura
+
+```
+fan_aggressor_gui.py  ──┐
+                        ├──► fan_aggressor.py (daemon)
+fan_aggressor (CLI)   ──┘           │
+                                    ▼
+                            nekroctl.py
+                                    │
+                                    ▼
+                          nekro-sense (kernel module)
+                                    │
+                                    ▼
+                              Hardware (WMI)
 ```
 
 ## Exemplos de Uso
 
-### Notebook esquentando muito
+### Gaming (mais resfriamento)
 
 ```bash
 fan_aggressor set both +20
 fan_aggressor enable
-sudo systemctl start fan-aggressor
+sudo systemctl restart fan-aggressor
 ```
 
-### Reduzir ruído (cuidado!)
+### Trabalho silencioso
 
 ```bash
-fan_aggressor set both -10
+fan_aggressor set both -5
 fan_aggressor enable
-sudo systemctl start fan-aggressor
+sudo systemctl restart fan-aggressor
 ```
 
-Monitore as temperaturas!
-
-### Gaming (mais agressivo)
+### Desativar temporariamente
 
 ```bash
-fan_aggressor set cpu +15
-fan_aggressor set gpu +25
-fan_aggressor enable
-sudo systemctl start fan-aggressor
+fan_aggressor disable
 ```
 
-## Arquitetura Técnica
+Os fans voltam ao modo automático do sistema.
 
-A aplicação utiliza três métodos de controle:
+## Avisos
 
-1. **Leitura via hwmon**: Lê velocidades atuais dos fans através do driver acer-wmi
-2. **Controle via EC**: Escreve diretamente no Embedded Controller via `/sys/kernel/debug/ec`
-3. **Cálculo de duty cycle**: Converte RPM em porcentagem e aplica offset
-
-### Offsets do EC (Acer)
-
-- `0x03`: Fan mode control
-- `0x71`: CPU fan duty cycle
-- `0x75`: GPU fan duty cycle
-
-## Avisos Importantes
-
-- O controle inadequado de ventiladores pode causar superaquecimento
 - Monitore as temperaturas ao usar offsets negativos
-- Em caso de dúvida, use offsets conservadores (+5% a +10%)
-- O sistema pode sobrepor o controle manual em situações críticas
+- O sistema pode atingir throttling se os fans forem muito lentos
+- Em caso de superaquecimento, desabilite o aggressor
 
 ## Desinstalação
 
@@ -132,16 +204,9 @@ sudo systemctl stop fan-aggressor
 sudo systemctl disable fan-aggressor
 sudo rm /etc/systemd/system/fan-aggressor.service
 sudo rm /usr/local/bin/fan_aggressor
+sudo rm -rf /etc/fan-aggressor
 sudo systemctl daemon-reload
 ```
-
-## Fontes e Referências
-
-- [Fan speed control - ArchWiki](https://wiki.archlinux.org/title/Fan_speed_control)
-- [Controlling Fan Speed in Linux | Baeldung](https://www.baeldung.com/linux/control-fan-speed)
-- [GitHub - PXDiv/Div-Acer-Manager-Fan-Controls](https://github.com/PXDiv/Div-Acer-Manager-Fan-Controls)
-- [GitHub - F0rth/acer_ec](https://github.com/F0rth/acer_ec)
-- [platform/x86: acer-wmi: Add fan control support [LWN.net]](https://lwn.net/Articles/1010222/)
 
 ## Licença
 
