@@ -241,7 +241,7 @@ class FanAggressorApp(Adw.Application):
     def _build_window(self) -> Adw.ApplicationWindow:
         win = Adw.ApplicationWindow(application=self)
         win.set_title("Fan Aggressor")
-        win.set_default_size(420, 580)
+        win.set_default_size(450, 955)
         win.set_resizable(True)
 
         icon_theme = Gtk.IconTheme.get_for_display(win.get_display())
@@ -508,16 +508,11 @@ class FanAggressorApp(Adw.Application):
 
     def _refresh_all(self):
         status = get_service_status()
-        running = is_daemon_running()
 
-        if status == "active" and running:
+        if status == "active":
             self.status_label.set_text("Running")
             self.status_label.remove_css_class("error")
             self.status_label.add_css_class("success")
-        elif status == "active":
-            self.status_label.set_text("Starting...")
-            self.status_label.remove_css_class("error")
-            self.status_label.remove_css_class("success")
         else:
             self.status_label.set_text("Stopped")
             self.status_label.add_css_class("error")
