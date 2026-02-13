@@ -10,6 +10,10 @@ import threading
 from pathlib import Path
 from typing import Optional, Dict, Any, Callable
 
+for _p in [str(Path(__file__).parent), "/usr/local/lib/fan-aggressor"]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 try:
     import gi
     gi.require_version("Gtk", "4.0")
@@ -23,6 +27,12 @@ except Exception as e:
     raise
 
 from fan_monitor import FanMonitor, rpm_to_percent
+from cpu_power import (
+    get_available_governors, get_current_governor,
+    get_available_epp, get_current_epp,
+    get_turbo_enabled,
+    set_governor, set_epp, set_turbo
+)
 
 CONFIG_FILE = Path("/etc/fan-aggressor/config.json")
 STATE_FILE = Path("/var/run/fan-aggressor.state")
@@ -37,7 +47,10 @@ def load_config() -> Dict[str, Any]:
         "poll_interval": 1.0,
         "hybrid_mode": True,
         "temp_threshold_engage": 70,
-        "temp_threshold_disengage": 65
+        "temp_threshold_disengage": 65,
+        "cpu_governor": "powersave",
+        "cpu_turbo_enabled": True,
+        "cpu_epp": "balance_performance"
     }
     if CONFIG_FILE.exists():
         try:
@@ -172,7 +185,7 @@ class FanAggressorApp(Adw.Application):
     def _build_window(self) -> Adw.ApplicationWindow:
         win = Adw.ApplicationWindow(application=self)
         win.set_title("Fan Aggressor")
-        win.set_default_size(450, 955)
+        win.set_default_size(850, 955)
         win.set_resizable(True)
 
         icon_theme = Gtk.IconTheme.get_for_display(win.get_display())
@@ -196,16 +209,24 @@ class FanAggressorApp(Adw.Application):
         scroll = Gtk.ScrolledWindow(vexpand=True, hexpand=True)
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
-        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        main_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         main_box.set_margin_start(12)
         main_box.set_margin_end(12)
         main_box.set_margin_top(12)
         main_box.set_margin_bottom(12)
+        main_box.set_homogeneous(True)
 
-        self._build_status_group(main_box)
-        self._build_control_group(main_box)
-        self._build_offset_group(main_box)
-        self._build_threshold_group(main_box)
+        left_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        self._build_status_group(left_col)
+        self._build_control_group(left_col)
+        self._build_offset_group(left_col)
+        self._build_threshold_group(left_col)
+        main_box.append(left_col)
+
+        right_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        self._build_cpu_power_group(right_col)
+        self._build_cpu_status_group(right_col)
+        main_box.append(right_col)
 
         scroll.set_child(main_box)
         content.append(scroll)
@@ -357,6 +378,128 @@ class FanAggressorApp(Adw.Application):
 
         parent.append(group)
 
+    def _build_cpu_power_group(self, parent: Gtk.Box):
+        group = Adw.PreferencesGroup(
+            title="CPU Power Management",
+            description="Governor, turbo boost and energy preference"
+        )
+
+        self.governor_items = Gtk.StringList.new(get_available_governors() or ["powersave", "performance"])
+        self.governor_row = Adw.ComboRow(
+            title="Governor",
+            model=self.governor_items
+        )
+        current_gov = self.config.get("cpu_governor", "powersave")
+        gov_list = get_available_governors() or ["powersave", "performance"]
+        if current_gov in gov_list:
+            self.governor_row.set_selected(gov_list.index(current_gov))
+        self.governor_row.connect("notify::selected", self._on_cpu_power_changed)
+        group.add(self.governor_row)
+
+        self.turbo_row = Adw.SwitchRow(
+            title="Turbo Boost",
+            subtitle="Intel Turbo Boost Technology"
+        )
+        self.turbo_row.set_active(self.config.get("cpu_turbo_enabled", True))
+        self.turbo_row.connect("notify::active", self._on_cpu_power_changed)
+        group.add(self.turbo_row)
+
+        epp_options = get_available_epp() or [
+            "default", "performance", "balance_performance",
+            "balance_power", "power"
+        ]
+        self.epp_items = Gtk.StringList.new(epp_options)
+        self.epp_row = Adw.ComboRow(
+            title="Energy Performance",
+            subtitle="CPU energy/performance bias",
+            model=self.epp_items
+        )
+        current_epp = self.config.get("cpu_epp", "balance_performance")
+        if current_epp in epp_options:
+            self.epp_row.set_selected(epp_options.index(current_epp))
+        self.epp_row.connect("notify::selected", self._on_cpu_power_changed)
+        group.add(self.epp_row)
+
+        parent.append(group)
+
+    def _build_cpu_status_group(self, parent: Gtk.Box):
+        group = Adw.PreferencesGroup(
+            title="CPU Status",
+            description="Current values read from sysfs"
+        )
+
+        self.cpu_gov_status_row = Adw.ActionRow(title="Governor")
+        self.cpu_gov_status_label = Gtk.Label(xalign=1)
+        self.cpu_gov_status_label.add_css_class("dim-label")
+        self.cpu_gov_status_row.add_suffix(self.cpu_gov_status_label)
+        group.add(self.cpu_gov_status_row)
+
+        self.cpu_turbo_status_row = Adw.ActionRow(title="Turbo Boost")
+        self.cpu_turbo_status_label = Gtk.Label(xalign=1)
+        self.cpu_turbo_status_label.add_css_class("dim-label")
+        self.cpu_turbo_status_row.add_suffix(self.cpu_turbo_status_label)
+        group.add(self.cpu_turbo_status_row)
+
+        self.cpu_epp_status_row = Adw.ActionRow(title="Energy Performance")
+        self.cpu_epp_status_label = Gtk.Label(xalign=1)
+        self.cpu_epp_status_label.add_css_class("dim-label")
+        self.cpu_epp_status_row.add_suffix(self.cpu_epp_status_label)
+        group.add(self.cpu_epp_status_row)
+
+        parent.append(group)
+
+    def _on_cpu_power_changed(self, widget, _):
+        if self.updating:
+            return
+
+        gov_idx = self.governor_row.get_selected()
+        gov_item = self.governor_items.get_string(gov_idx)
+        if gov_item:
+            self.config["cpu_governor"] = gov_item
+
+        self.config["cpu_turbo_enabled"] = self.turbo_row.get_active()
+
+        epp_idx = self.epp_row.get_selected()
+        epp_item = self.epp_items.get_string(epp_idx)
+        if epp_item:
+            self.config["cpu_epp"] = epp_item
+
+        self._save_config()
+        self._apply_cpu_power()
+
+    def _apply_cpu_power(self):
+        gov = self.config.get("cpu_governor")
+        turbo = self.config.get("cpu_turbo_enabled", True)
+        epp = self.config.get("cpu_epp")
+
+        if set_governor(gov) and set_turbo(turbo) and set_epp(epp):
+            return
+
+        def _worker():
+            script = (
+                f"import sys; sys.path.insert(0, '{Path(__file__).parent}'); "
+                f"sys.path.insert(0, '/usr/local/lib/fan-aggressor'); "
+                f"from cpu_power import set_governor, set_turbo, set_epp; "
+                f"set_governor('{gov}'); set_turbo({turbo}); set_epp('{epp}')"
+            )
+            try:
+                subprocess.run(
+                    ["sudo", "-n", "python3", "-c", script],
+                    capture_output=True, timeout=5
+                )
+                return
+            except Exception:
+                pass
+            try:
+                subprocess.run(
+                    ["pkexec", "python3", "-c", script],
+                    capture_output=True, timeout=10
+                )
+            except Exception:
+                pass
+
+        threading.Thread(target=_worker, daemon=True).start()
+
     def _sync_link_visibility(self):
         linked = self.link_offsets.get_active()
         self.gpu_offset_row.set_visible(not linked)
@@ -457,6 +600,20 @@ class FanAggressorApp(Adw.Application):
         self.gpu_offset_row.set_value(self.config.get("gpu_fan_offset", 0))
         self.engage_row.set_value(self.config.get("temp_threshold_engage", 70))
         self.disengage_row.set_value(self.config.get("temp_threshold_disengage", 65))
+
+        gov_list = get_available_governors() or ["powersave", "performance"]
+        config_gov = self.config.get("cpu_governor", "powersave")
+        if config_gov in gov_list:
+            self.governor_row.set_selected(gov_list.index(config_gov))
+        self.turbo_row.set_active(self.config.get("cpu_turbo_enabled", True))
+        epp_list = get_available_epp() or [
+            "default", "performance", "balance_performance",
+            "balance_power", "power"
+        ]
+        config_epp = self.config.get("cpu_epp", "balance_performance")
+        if config_epp in epp_list:
+            self.epp_row.set_selected(epp_list.index(config_epp))
+
         self.updating = False
 
         if self.config.get("hybrid_mode", True):
@@ -492,6 +649,11 @@ class FanAggressorApp(Adw.Application):
                 self.boost_label.set_text("Waiting...")
             self.boost_label.remove_css_class("accent")
             self.boost_label.add_css_class("dim-label")
+
+        self.cpu_gov_status_label.set_text(get_current_governor())
+        turbo = get_turbo_enabled()
+        self.cpu_turbo_status_label.set_text("ON" if turbo else "OFF")
+        self.cpu_epp_status_label.set_text(get_current_epp())
 
     def _auto_refresh(self) -> bool:
         self._refresh_all()

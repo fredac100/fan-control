@@ -9,9 +9,13 @@ fi
 
 echo "=== Instalando Fan Aggressor ==="
 
-echo "1. Copiando executável..."
+echo "1. Copiando executável e módulos..."
 cp fan_aggressor.py /usr/local/bin/fan_aggressor
 chmod +x /usr/local/bin/fan_aggressor
+
+mkdir -p /usr/local/lib/fan-aggressor
+cp fan_monitor.py /usr/local/lib/fan-aggressor/
+cp cpu_power.py /usr/local/lib/fan-aggressor/
 
 echo "2. Instalando serviço systemd..."
 cat > /etc/systemd/system/fan-aggressor.service << 'EOF'
@@ -22,6 +26,7 @@ After=multi-user.target
 [Service]
 Type=simple
 ExecStartPre=-/sbin/modprobe ec_sys write_support=1
+Environment=PYTHONPATH=/usr/local/lib/fan-aggressor
 ExecStart=/usr/local/bin/fan_aggressor daemon
 Restart=on-failure
 RestartSec=5

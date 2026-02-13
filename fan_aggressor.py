@@ -10,7 +10,15 @@ import subprocess
 from pathlib import Path
 from typing import Dict
 
+for _p in [str(Path(__file__).parent), "/usr/local/lib/fan-aggressor"]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 from fan_monitor import FanMonitor, rpm_to_percent as rpm_to_duty
+from cpu_power import (
+    apply_cpu_power, get_current_governor, get_turbo_enabled,
+    get_current_epp
+)
 
 NEKROCTL = "/home/fred/nekro-sense/tools/nekroctl.py"
 CONFIG_FILE = Path("/etc/fan-aggressor/config.json")
@@ -105,7 +113,10 @@ class FanAggressor:
             "poll_interval": 1.0,
             "hybrid_mode": True,
             "temp_threshold_engage": 70,
-            "temp_threshold_disengage": 65
+            "temp_threshold_disengage": 65,
+            "cpu_governor": "powersave",
+            "cpu_turbo_enabled": True,
+            "cpu_epp": "balance_performance"
         }
         if self.config_path.exists():
             try:
@@ -169,6 +180,11 @@ class FanAggressor:
             print(f"  Fan 1 (CPU): {fan1_rpm} RPM (~{rpm_to_duty(fan1_rpm)}% estimado)")
             print(f"  Fan 2 (GPU): {fan2_rpm} RPM (~{rpm_to_duty(fan2_rpm)}% estimado)")
 
+        print(f"\nCPU Power:")
+        print(f"  Governor: {get_current_governor()}")
+        print(f"  Turbo Boost: {'ON' if get_turbo_enabled() else 'OFF'}")
+        print(f"  EPP: {get_current_epp()}")
+
         if temps:
             print(f"\nTemperaturas:")
             for name, val in temps.items():
@@ -193,6 +209,13 @@ class FanAggressor:
                 print(f"\nCurva fixa para {max_temp:.0f}°C: {base_duty}%")
                 print(f"Com offset +{self.config['cpu_fan_offset']}%: {min(100, base_duty + self.config['cpu_fan_offset'])}%")
 
+    def _get_cpu_power_state(self) -> tuple:
+        return (
+            self.config.get("cpu_governor"),
+            self.config.get("cpu_turbo_enabled"),
+            self.config.get("cpu_epp")
+        )
+
     def daemon(self):
         self.running = True
         self.is_boosting = False
@@ -209,6 +232,13 @@ class FanAggressor:
         print(f"Fan Aggressor iniciado ({'HIBRIDO' if hybrid else 'CURVA FIXA'})")
         print(f"CPU offset: {self.config['cpu_fan_offset']:+d}%")
         print(f"GPU offset: {self.config['gpu_fan_offset']:+d}%")
+
+        apply_cpu_power(self.config)
+        self.last_cpu_power = self._get_cpu_power_state()
+        print(f"CPU Power: governor={self.config.get('cpu_governor')}, "
+              f"turbo={'on' if self.config.get('cpu_turbo_enabled', True) else 'off'}, "
+              f"epp={self.config.get('cpu_epp')}")
+
         if hybrid:
             print(f"Threshold engage: {self.config.get('temp_threshold_engage', 70)}°C")
             print(f"Threshold disengage: {self.config.get('temp_threshold_disengage', 65)}°C")
@@ -221,6 +251,14 @@ class FanAggressor:
             while self.running:
                 self.config = self._load_config()
                 hybrid = self.config.get('hybrid_mode', True)
+
+                current_cpu_power = self._get_cpu_power_state()
+                if current_cpu_power != self.last_cpu_power:
+                    apply_cpu_power(self.config)
+                    self.last_cpu_power = current_cpu_power
+                    print(f"CPU Power atualizado: governor={self.config.get('cpu_governor')}, "
+                          f"turbo={'on' if self.config.get('cpu_turbo_enabled', True) else 'off'}, "
+                          f"epp={self.config.get('cpu_epp')}")
 
                 if not self.config["enabled"]:
                     if self.last_cpu != -1 or self.is_boosting:
