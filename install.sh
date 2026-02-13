@@ -16,8 +16,10 @@ chmod +x /usr/local/bin/fan_aggressor
 mkdir -p /usr/local/lib/fan-aggressor
 cp fan_monitor.py /usr/local/lib/fan-aggressor/
 cp cpu_power.py /usr/local/lib/fan-aggressor/
+cp epp_override.py /usr/local/bin/epp_override
+chmod +x /usr/local/bin/epp_override
 
-echo "2. Instalando serviço systemd..."
+echo "2. Instalando serviços systemd..."
 cat > /etc/systemd/system/fan-aggressor.service << 'EOF'
 [Unit]
 Description=Fan Aggressor - Controle de agressividade dos ventiladores
@@ -30,6 +32,23 @@ Environment=PYTHONPATH=/usr/local/lib/fan-aggressor
 ExecStart=/usr/local/bin/fan_aggressor daemon
 Restart=on-failure
 RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > /etc/systemd/system/epp-override.service << 'EOF'
+[Unit]
+Description=EPP Override - Corrige mapeamento platform_profile → EPP
+After=power-profiles-daemon.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/epp_override
+Restart=on-failure
+RestartSec=3
 StandardOutput=journal
 StandardError=journal
 
