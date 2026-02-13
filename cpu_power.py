@@ -10,6 +10,15 @@ EPP_PREF = "cpufreq/energy_performance_preference"
 EPP_AVAILABLE = "cpufreq/energy_performance_available_preferences"
 NO_TURBO = "/sys/devices/system/cpu/intel_pstate/no_turbo"
 CPU_BASE = "/sys/devices/system/cpu"
+PLATFORM_PROFILE = "/sys/firmware/acpi/platform_profile"
+
+EPP_TO_PROFILE = {
+    "power": "low-power",
+    "balance_power": "balanced",
+    "balance_performance": "balanced-performance",
+    "performance": "performance",
+    "default": "balanced",
+}
 
 
 def _cpu_dirs() -> List[Path]:
@@ -69,6 +78,11 @@ def set_epp(pref: str) -> bool:
     available = get_available_epp()
     if available and pref not in available:
         return False
+
+    profile = EPP_TO_PROFILE.get(pref)
+    if profile:
+        _write_sysfs(PLATFORM_PROFILE, profile)
+
     success = True
     for cpu in _cpu_dirs():
         if not _write_sysfs(str(cpu / EPP_PREF), pref):
