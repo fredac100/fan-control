@@ -50,7 +50,8 @@ def load_config() -> Dict[str, Any]:
         "temp_threshold_disengage": 65,
         "cpu_governor": "powersave",
         "cpu_turbo_enabled": True,
-        "cpu_epp": "balance_performance"
+        "cpu_epp": "balance_performance",
+        "link_offsets": True
     }
     if CONFIG_FILE.exists():
         try:
@@ -320,7 +321,7 @@ class FanAggressorApp(Adw.Application):
         )
 
         self.link_offsets = Adw.SwitchRow(title="Link CPU and GPU")
-        self.link_offsets.set_active(True)
+        self.link_offsets.set_active(self.config.get("link_offsets", True))
         self.link_offsets.connect("notify::active", self._on_link_changed)
         group.add(self.link_offsets)
 
@@ -509,6 +510,10 @@ class FanAggressorApp(Adw.Application):
             self.cpu_offset_row.set_title("CPU Offset")
 
     def _on_link_changed(self, row, _):
+        if self.updating:
+            return
+        self.config["link_offsets"] = self.link_offsets.get_active()
+        self._save_config()
         self._sync_link_visibility()
         if self.link_offsets.get_active():
             self.gpu_offset_row.set_value(self.cpu_offset_row.get_value())
@@ -600,6 +605,7 @@ class FanAggressorApp(Adw.Application):
         self.gpu_offset_row.set_value(self.config.get("gpu_fan_offset", 0))
         self.engage_row.set_value(self.config.get("temp_threshold_engage", 70))
         self.disengage_row.set_value(self.config.get("temp_threshold_disengage", 65))
+        self.link_offsets.set_active(self.config.get("link_offsets", True))
 
         gov_list = get_available_governors() or ["powersave", "performance"]
         config_gov = self.config.get("cpu_governor", "powersave")
@@ -615,6 +621,7 @@ class FanAggressorApp(Adw.Application):
             self.epp_row.set_selected(epp_list.index(config_epp))
 
         self.updating = False
+        self._sync_link_visibility()
 
         if self.config.get("hybrid_mode", True):
             self.mode_label.set_text("Hybrid (temp-based)")
