@@ -381,8 +381,7 @@ class FanAggressorApp(Adw.Application):
 
     def _build_cpu_power_group(self, parent: Gtk.Box):
         group = Adw.PreferencesGroup(
-            title="CPU Power Management",
-            description="Governor, turbo boost and energy preference"
+            title="CPU Power Management"
         )
 
         self.governor_items = Gtk.StringList.new(get_available_governors() or ["powersave", "performance"])
