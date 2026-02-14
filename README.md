@@ -208,8 +208,20 @@ Arquivo: `/etc/fan-aggressor/config.json`
 | `hybrid_mode` | Se true, usa thresholds; se false, controla sempre | true/false |
 | `temp_threshold_engage` | Temperatura para ativar boost | °C (padrão: 70) |
 | `temp_threshold_disengage` | Temperatura para voltar ao auto | °C (padrão: 65) |
-| `nekroctl_path` | Caminho do nekroctl (override) | caminho absoluto ou null |
-| `failsafe_mode` | Fail-safe em erro de sensores | `auto` ou `max` |
+| `nekroctl_path` | Caminho customizado para nekroctl | caminho absoluto ou `null` para auto-detect |
+| `failsafe_mode` | Comportamento em falha de sensores | `auto` (aguarda) ou `max` (força 100%) |
+
+**Sobre `nekroctl_path`**: Por padrão (`null`), o sistema busca `nekroctl.py` em:
+1. Variável de ambiente `NEKROCTL`
+2. `/home/fred/nekro-sense/tools/nekroctl.py`
+3. `/usr/local/bin/nekroctl.py`, `/usr/local/bin/nekroctl`, `/usr/bin/nekroctl`
+4. `/opt/nekro-sense/tools/nekroctl.py`
+
+Defina um caminho absoluto apenas se estiver em local não-padrão.
+
+**Sobre `failsafe_mode`**: Se sensores de temperatura falharem (retorno `None`, <0°C, >120°C):
+- `auto` (padrão): aguarda até sensores voltarem, mantém estado anterior
+- `max`: força fans a 100% como medida de segurança contra superaquecimento
 
 ### Parâmetros de CPU Power
 
@@ -352,7 +364,28 @@ sudo systemctl daemon-reload
 ### Fans não respondem
 - Verifique se o nekro-sense está carregado: `lsmod | grep nekro`
 - Confira se o daemon está rodando: `systemctl status fan-aggressor`
+- Verifique se nekroctl foi encontrado: `journalctl -u fan-aggressor | grep nekroctl`
 - Teste manualmente: `sudo python3 /home/fred/nekro-sense/tools/nekroctl.py --fan1 50`
+- Se nekroctl está em local não-padrão, configure `nekroctl_path` no config.json
+
+### Sensores de temperatura não funcionam
+- Verifique: `cat /sys/class/hwmon/hwmon*/name` (deve mostrar "acer" ou "coretemp")
+- Se falhar constantemente, configure `failsafe_mode: "max"` para forçar fans a 100%
+
+### Daemon não inicia após atualização
+- O serviço systemd agora tem hardening de segurança
+- Se houver conflitos de permissão, verifique os logs: `journalctl -u fan-aggressor -n 50`
+- Paths permitidos: `/etc/fan-aggressor` (leitura/escrita) e `/var/run` (PID/state)
+
+## Segurança
+
+O serviço systemd inclui hardening:
+- `NoNewPrivileges=true` - Previne escalação de privilégios
+- `PrivateTmp=true` - Isola `/tmp` do sistema
+- `ProtectSystem=full` - Sistema de arquivos read-only exceto paths explícitos
+- `ReadWritePaths=/etc/fan-aggressor /var/run` - Apenas paths necessários são graváveis
+
+Escrita de config é atômica (`.tmp` + `rename`) para prevenir corrupção em caso de falha.
 
 ## Licença
 
