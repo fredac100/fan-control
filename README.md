@@ -26,6 +26,7 @@ O nekro-sense substitui o driver `acer_wmi` do kernel e expõe controles de vent
 - **Controle separado CPU/GPU** - Offsets independentes para cada ventilador
 
 ### Gerenciamento de Energia CPU
+- **Power Profiles** - 4 perfis pré-configurados com aplicação instantânea
 - **CPU Governor** - Alterna entre `performance` e `powersave`
 - **Intel Turbo Boost** - Liga/desliga turbo boost
 - **Energy Performance Preference (EPP)** - 5 níveis de performance/economia
@@ -75,6 +76,19 @@ O botão físico de energia do Predator possui 4 estágios, mas o `power-profile
 | 2 (BALANCED) | `balanced` | `balance_performance` | **`balance_power`** |
 | 3 (PERFORMANCE) | `balanced-performance` | `balance_performance` | `balance_performance` ✓ |
 | 4 (TURBO) | `performance` | `performance` | `performance` ✓ |
+
+### Power Profiles (GUI)
+
+A GUI inclui 4 perfis pré-configurados que aplicam governor, turbo e EPP com um clique:
+
+| Perfil | Governor | Turbo | EPP | Uso |
+|--------|----------|-------|-----|-----|
+| **Stealth Mode** | powersave | OFF | power | Silencioso, sem turbo, economia total |
+| **Cruise Control** | powersave | ON | balance_power | Dia a dia, equilíbrio consumo/performance |
+| **Boost Drive** | powersave | ON | balance_performance | Produtividade, alta performance com eficiência |
+| **Nitro Overdrive** | performance | ON | performance | Gaming, benchmark, performance máxima |
+
+O perfil ativo é indicado visualmente. Os perfis sincronizam com o botão físico do Predator e com mudanças individuais nos controles de governor/turbo/EPP.
 
 ## Requisitos
 
@@ -294,7 +308,7 @@ Módulo para leitura de fan speeds e temperaturas via hwmon (`/sys/class/hwmon`)
 ```bash
 fan_aggressor set both +20
 fan_aggressor enable
-# Via GUI: Governor = performance, Turbo = ON, EPP = performance
+# Via GUI: perfil "Nitro Overdrive"
 ```
 
 ### Trabalho silencioso (economia de energia)
@@ -302,7 +316,7 @@ fan_aggressor enable
 ```bash
 fan_aggressor set both -5
 fan_aggressor enable
-# Via GUI: Governor = powersave, Turbo = OFF, EPP = balance_power
+# Via GUI: perfil "Stealth Mode"
 ```
 
 ### Balanced (padrão recomendado)
@@ -310,7 +324,7 @@ fan_aggressor enable
 ```bash
 fan_aggressor set both 0
 fan_aggressor enable
-# Via GUI: Governor = powersave, Turbo = ON, EPP = balance_performance
+# Via GUI: perfil "Cruise Control"
 ```
 
 ### Desativar controle de fans temporariamente
