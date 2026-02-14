@@ -245,7 +245,7 @@ class FanAggressorApp(Adw.Application):
 
         right_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         self._build_cpu_power_group(right_col)
-        self._build_cpu_status_group(right_col)
+        self._build_power_profiles_group(right_col)
         main_box.append(right_col)
 
         scroll.set_child(main_box)
@@ -441,31 +441,92 @@ class FanAggressorApp(Adw.Application):
 
         parent.append(group)
 
-    def _build_cpu_status_group(self, parent: Gtk.Box):
-        group = Adw.PreferencesGroup(
-            title="CPU Status",
-            description="Current values read from sysfs"
-        )
+    def _build_power_profiles_group(self, parent: Gtk.Box):
+        group = Adw.PreferencesGroup(title="Power Profiles")
 
-        self.cpu_gov_status_row = Adw.ActionRow(title="Governor")
-        self.cpu_gov_status_label = Gtk.Label(xalign=1)
-        self.cpu_gov_status_label.add_css_class("dim-label")
-        self.cpu_gov_status_row.add_suffix(self.cpu_gov_status_label)
-        group.add(self.cpu_gov_status_row)
+        self.profile_buttons = {}
+        self.profile_icons = {}
 
-        self.cpu_turbo_status_row = Adw.ActionRow(title="Turbo Boost")
-        self.cpu_turbo_status_label = Gtk.Label(xalign=1)
-        self.cpu_turbo_status_label.add_css_class("dim-label")
-        self.cpu_turbo_status_row.add_suffix(self.cpu_turbo_status_label)
-        group.add(self.cpu_turbo_status_row)
+        profiles = [
+            ("stealth", "Stealth Mode", "Silencioso, sem turbo, economia total",
+             {"cpu_governor": "powersave", "cpu_turbo_enabled": False, "cpu_epp": "power"}),
+            ("cruise", "Cruise Control", "Equilibrado, turbo sob demanda",
+             {"cpu_governor": "powersave", "cpu_turbo_enabled": True, "cpu_epp": "balance_power"}),
+            ("boost", "Boost Drive", "Alta performance com eficiencia",
+             {"cpu_governor": "powersave", "cpu_turbo_enabled": True, "cpu_epp": "balance_performance"}),
+            ("nitro", "Nitro Overdrive", "Performance maxima, sem limites",
+             {"cpu_governor": "performance", "cpu_turbo_enabled": True, "cpu_epp": "performance"}),
+        ]
 
-        self.cpu_epp_status_row = Adw.ActionRow(title="Energy Performance")
-        self.cpu_epp_status_label = Gtk.Label(xalign=1)
-        self.cpu_epp_status_label.add_css_class("dim-label")
-        self.cpu_epp_status_row.add_suffix(self.cpu_epp_status_label)
-        group.add(self.cpu_epp_status_row)
+        for profile_id, title, subtitle, settings in profiles:
+            row = Adw.ActionRow(title=title, subtitle=subtitle)
+
+            icon = Gtk.Image()
+            icon.set_pixel_size(16)
+            row.add_prefix(icon)
+            self.profile_icons[profile_id] = icon
+
+            btn = Gtk.Button(label="Activate", valign=Gtk.Align.CENTER)
+            btn.connect("clicked", self._on_profile_clicked, profile_id, settings)
+            row.add_suffix(btn)
+            row.set_activatable_widget(btn)
+
+            self.profile_buttons[profile_id] = btn
+            group.add(row)
 
         parent.append(group)
+        self._update_profile_indicator()
+
+    def _on_profile_clicked(self, button, profile_id, settings):
+        self.updating = True
+        for key, value in settings.items():
+            self.config[key] = value
+
+        gov_list = get_available_governors() or ["powersave", "performance"]
+        gov = settings.get("cpu_governor", "powersave")
+        if gov in gov_list:
+            self.governor_row.set_selected(gov_list.index(gov))
+        self.turbo_row.set_active(settings.get("cpu_turbo_enabled", True))
+        epp_list = get_available_epp() or [
+            "default", "performance", "balance_performance",
+            "balance_power", "power"
+        ]
+        epp = settings.get("cpu_epp", "balance_performance")
+        if epp in epp_list:
+            self.epp_row.set_selected(epp_list.index(epp))
+        self.updating = False
+
+        self._save_config()
+        self._apply_cpu_power()
+        self._update_profile_indicator()
+
+    def _update_profile_indicator(self):
+        current_gov = get_current_governor()
+        current_turbo = get_turbo_enabled()
+        current_epp = get_current_epp()
+
+        profile_map = {
+            ("powersave", False, "power"): "stealth",
+            ("powersave", True, "balance_power"): "cruise",
+            ("powersave", True, "balance_performance"): "boost",
+            ("performance", True, "performance"): "nitro",
+        }
+
+        active = profile_map.get((current_gov, current_turbo, current_epp))
+
+        for pid, icon in self.profile_icons.items():
+            btn = self.profile_buttons[pid]
+            if pid == active:
+                icon.set_from_icon_name("emblem-ok-symbolic")
+                btn.set_label("Active")
+                btn.set_sensitive(False)
+                btn.remove_css_class("suggested-action")
+                btn.add_css_class("success")
+            else:
+                icon.set_from_icon_name(None)
+                btn.set_label("Activate")
+                btn.set_sensitive(True)
+                btn.remove_css_class("success")
 
     def _on_cpu_power_changed(self, widget, _):
         if self.updating:
@@ -485,6 +546,7 @@ class FanAggressorApp(Adw.Application):
 
         self._save_config()
         self._apply_cpu_power()
+        self._update_profile_indicator()
 
     def _apply_cpu_power(self):
         gov = self.config.get("cpu_governor")
@@ -531,11 +593,13 @@ class FanAggressorApp(Adw.Application):
         if self.updating:
             return
         self.config["link_offsets"] = self.link_offsets.get_active()
-        self._save_config()
         self._sync_link_visibility()
         if self.link_offsets.get_active():
+            self.updating = True
             self.gpu_offset_row.set_value(self.cpu_offset_row.get_value())
-            self._on_config_changed(None, None)
+            self.updating = False
+            self.config["gpu_fan_offset"] = int(self.cpu_offset_row.get_value())
+        self._save_config()
 
     def _on_cpu_offset_changed(self, row, _):
         if self.updating:
@@ -684,10 +748,6 @@ class FanAggressorApp(Adw.Application):
         current_turbo = get_turbo_enabled()
         current_epp = get_current_epp()
 
-        self.cpu_gov_status_label.set_text(current_gov)
-        self.cpu_turbo_status_label.set_text("ON" if current_turbo else "OFF")
-        self.cpu_epp_status_label.set_text(current_epp)
-
         self.updating = True
         gov_list = get_available_governors() or ["powersave", "performance"]
         if current_gov in gov_list:
@@ -700,6 +760,8 @@ class FanAggressorApp(Adw.Application):
         if current_epp in epp_list:
             self.epp_row.set_selected(epp_list.index(current_epp))
         self.updating = False
+
+        self._update_profile_indicator()
 
     def _auto_refresh(self) -> bool:
         self._refresh_all()

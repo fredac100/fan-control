@@ -297,8 +297,6 @@ class FanAggressor:
     def daemon(self):
         self.running = True
         self.is_boosting = False
-        signal.signal(signal.SIGTERM, self._signal_handler)
-        signal.signal(signal.SIGINT, self._signal_handler)
 
         try:
             with open(PID_FILE, 'w') as f:
@@ -325,6 +323,9 @@ class FanAggressor:
             clear_state()
             print("Iniciando em modo AUTO...")
             time.sleep(2)
+
+        signal.signal(signal.SIGTERM, self._signal_handler)
+        signal.signal(signal.SIGINT, self._signal_handler)
 
         try:
             while self.running:
