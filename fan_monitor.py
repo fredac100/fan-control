@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 FAN_RPM_MIN = 0
 FAN_RPM_MAX = 7500
@@ -65,9 +65,9 @@ class FanMonitor:
                     pass
         return temps
 
-    def get_max_temp(self) -> float:
+    def get_max_temp(self) -> Optional[float]:
         temps = self.get_temps()
-        return max(temps.values()) if temps else 50.0
+        return max(temps.values()) if temps else None
 
 
 def rpm_to_percent(rpm: int) -> int:

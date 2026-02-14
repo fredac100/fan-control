@@ -51,7 +51,9 @@ def load_config() -> Dict[str, Any]:
         "cpu_governor": "powersave",
         "cpu_turbo_enabled": True,
         "cpu_epp": "balance_performance",
-        "link_offsets": True
+        "link_offsets": True,
+        "nekroctl_path": None,
+        "failsafe_mode": "auto"
     }
     if CONFIG_FILE.exists():
         try:
@@ -68,8 +70,10 @@ def load_config() -> Dict[str, Any]:
 def save_config(config: Dict[str, Any]) -> bool:
     try:
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(CONFIG_FILE, 'w') as f:
+        tmp_path = CONFIG_FILE.with_suffix(".tmp")
+        with open(tmp_path, 'w') as f:
             json.dump(config, f, indent=2)
+        os.replace(tmp_path, CONFIG_FILE)
         return True
     except PermissionError:
         return False
@@ -78,27 +82,42 @@ def save_config(config: Dict[str, Any]) -> bool:
 def save_config_privileged(config: Dict[str, Any], callback: Callable[[bool], None]):
     def _worker():
         content = json.dumps(config, indent=2)
+        tmp_path = str(CONFIG_FILE.with_suffix(".tmp"))
         try:
             proc = subprocess.run(
-                ["sudo", "-n", "tee", str(CONFIG_FILE)],
+                ["sudo", "-n", "tee", tmp_path],
                 input=content,
                 capture_output=True,
                 text=True
             )
             if proc.returncode == 0:
-                GLib.idle_add(callback, True)
-                return
+                proc = subprocess.run(
+                    ["sudo", "-n", "mv", tmp_path, str(CONFIG_FILE)],
+                    capture_output=True,
+                    text=True
+                )
+                if proc.returncode == 0:
+                    GLib.idle_add(callback, True)
+                    return
         except Exception:
             pass
 
         try:
             proc = subprocess.run(
-                ["pkexec", "tee", str(CONFIG_FILE)],
+                ["pkexec", "tee", tmp_path],
                 input=content,
                 capture_output=True,
                 text=True
             )
-            GLib.idle_add(callback, proc.returncode == 0)
+            if proc.returncode == 0:
+                proc = subprocess.run(
+                    ["pkexec", "mv", tmp_path, str(CONFIG_FILE)],
+                    capture_output=True,
+                    text=True
+                )
+                GLib.idle_add(callback, proc.returncode == 0)
+            else:
+                GLib.idle_add(callback, False)
         except Exception:
             GLib.idle_add(callback, False)
 
@@ -629,7 +648,10 @@ class FanAggressorApp(Adw.Application):
             self.mode_label.set_text("Fixed Curve")
 
         temp = self.monitor.get_max_temp()
-        self.temp_label.set_text(f"{temp:.0f}°C")
+        if temp is None:
+            self.temp_label.set_text("N/A")
+        else:
+            self.temp_label.set_text(f"{temp:.0f}°C")
 
         speeds = self.monitor.get_fan_speeds()
         if speeds:
@@ -650,7 +672,9 @@ class FanAggressorApp(Adw.Application):
             self.boost_label.add_css_class("accent")
         else:
             engage = self.config.get("temp_threshold_engage", 70)
-            if temp < engage:
+            if temp is None:
+                self.boost_label.set_text("Inactive (temp N/A)")
+            elif temp < engage:
                 self.boost_label.set_text(f"Inactive (temp < {engage}°C)")
             else:
                 self.boost_label.set_text("Waiting...")
