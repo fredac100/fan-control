@@ -26,6 +26,16 @@ PROFILE_TURBO = {
     "performance": True,
 }
 
+PROFILE_GOVERNOR = {
+    "low-power": "powersave",
+    "quiet": "powersave",
+    "balanced": "powersave",
+    "balanced-performance": "powersave",
+    "performance": "performance",
+}
+
+SCALING_GOVERNOR = "cpufreq/scaling_governor"
+
 
 def read_profile() -> str:
     try:
@@ -67,6 +77,23 @@ def get_turbo() -> bool:
         return True
 
 
+def get_governor() -> str:
+    try:
+        return (CPU_BASE / "cpu0" / SCALING_GOVERNOR).read_text().strip()
+    except (FileNotFoundError, PermissionError, OSError):
+        return "unknown"
+
+
+def set_governor(value: str) -> bool:
+    success = True
+    for gov_file in sorted(CPU_BASE.glob("cpu[0-9]*/cpufreq/scaling_governor")):
+        try:
+            gov_file.write_text(value)
+        except (PermissionError, OSError):
+            success = False
+    return success
+
+
 def main():
     running = True
 
@@ -89,22 +116,24 @@ def main():
 
         expected_epp = PROFILE_TO_EPP.get(profile)
         expected_turbo = PROFILE_TURBO.get(profile)
+        expected_gov = PROFILE_GOVERNOR.get(profile)
 
-        if expected_epp or expected_turbo is not None:
+        if expected_epp or expected_turbo is not None or expected_gov:
             profile_changed = profile != last_profile
             if profile_changed:
                 time.sleep(0.3)
 
             current_epp = read_epp()
             current_turbo = get_turbo()
+            current_gov = get_governor()
 
             changed = []
 
-            if expected_epp and current_epp != expected_epp:
-                if set_epp(expected_epp):
-                    changed.append(f"EPP: {current_epp} -> {expected_epp}")
+            if expected_gov and current_gov != expected_gov:
+                if set_governor(expected_gov):
+                    changed.append(f"Gov: {current_gov} -> {expected_gov}")
                 else:
-                    changed.append(f"EPP: falha")
+                    changed.append(f"Gov: falha")
 
             if expected_turbo is not None and current_turbo != expected_turbo:
                 if set_turbo(expected_turbo):
@@ -113,13 +142,19 @@ def main():
                 else:
                     changed.append(f"Turbo: falha")
 
-            current_state = (current_epp, current_turbo)
+            if expected_epp and current_epp != expected_epp:
+                if set_epp(expected_epp):
+                    changed.append(f"EPP: {current_epp} -> {expected_epp}")
+                else:
+                    changed.append(f"EPP: falha")
+
+            current_state = (current_gov, current_epp, current_turbo)
             if changed:
                 print(f"[{profile}] {', '.join(changed)}")
                 last_log[profile] = current_state
             elif profile_changed and last_log.get(profile) != current_state:
                 turbo_state = "ON" if current_turbo else "OFF"
-                print(f"[{profile}] EPP={current_epp}, Turbo={turbo_state}")
+                print(f"[{profile}] Gov={current_gov}, EPP={current_epp}, Turbo={turbo_state}")
                 last_log[profile] = current_state
 
         last_profile = profile
