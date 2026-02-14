@@ -26,7 +26,7 @@ O nekro-sense substitui o driver `acer_wmi` do kernel e expõe controles de vent
 - **Controle separado CPU/GPU** - Offsets independentes para cada ventilador
 
 ### Gerenciamento de Energia CPU
-- **Power Profiles** - 4 perfis pré-configurados com aplicação instantânea
+- **Power Profiles** - 5 perfis pré-configurados com aplicação instantânea
 - **CPU Governor** - Alterna entre `performance` e `powersave`
 - **Intel Turbo Boost** - Liga/desliga turbo boost
 - **Energy Performance Preference (EPP)** - 5 níveis de performance/economia
@@ -39,6 +39,8 @@ O nekro-sense substitui o driver `acer_wmi` do kernel e expõe controles de vent
 - **Status em tempo real** - Monitoramento de fans, temperatura e CPU power
 
 ## Como Funciona
+
+![Como funciona o Fan Aggressor](docs/how-it-works.png)
 
 ### Modo Híbrido (Recomendado)
 
@@ -79,16 +81,17 @@ O botão físico de energia do Predator possui 4 estágios, mas o `power-profile
 
 ### Power Profiles (GUI)
 
-A GUI inclui 4 perfis pré-configurados que aplicam governor, turbo e EPP com um clique:
+A GUI inclui 5 perfis pré-configurados que aplicam governor, turbo e EPP com um clique:
 
-| Perfil | Governor | Turbo | EPP | Uso |
-|--------|----------|-------|-----|-----|
-| **Stealth Mode** | powersave | OFF | power | Silencioso, sem turbo, economia total |
-| **Cruise Control** | powersave | ON | balance_power | Dia a dia, equilíbrio consumo/performance |
-| **Boost Drive** | powersave | ON | balance_performance | Produtividade, alta performance com eficiência |
-| **Nitro Overdrive** | performance | ON | performance | Gaming, benchmark, performance máxima |
+| Perfil | Governor | Turbo | EPP | Platform Profile | Uso |
+|--------|----------|-------|-----|-----------------|-----|
+| **Deep Sleep** | powersave | OFF | power | low-power | Economia extrema, CPU no mínimo absoluto |
+| **Stealth Mode** | powersave | OFF | power | quiet | Silencioso, sem turbo, economia total |
+| **Cruise Control** | powersave | ON | balance_power | balanced | Dia a dia, equilíbrio consumo/performance |
+| **Boost Drive** | powersave | ON | balance_performance | balanced-performance | Produtividade, alta performance com eficiência |
+| **Nitro Overdrive** | performance | ON | performance | performance | Gaming, benchmark, performance máxima |
 
-O perfil ativo é indicado visualmente. Os perfis sincronizam com o botão físico do Predator e com mudanças individuais nos controles de governor/turbo/EPP.
+O perfil ativo é indicado visualmente. Os perfis sincronizam com o botão físico do Predator e com mudanças individuais nos controles de governor/turbo/EPP. O Deep Sleep acessa o platform profile `low-power` que não é acessível pelo botão físico.
 
 ## Requisitos
 
