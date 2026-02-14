@@ -1,15 +1,21 @@
 # Fan Aggressor
 
-Controle dinâmico de ventiladores e gerenciamento de energia CPU para notebooks Acer no Linux.
+Controle dinâmico de ventiladores e gerenciamento de energia CPU para o **Acer Predator Helios Neo 16 (PHN16-72)** no Linux.
 
-## Compatibilidade
+> **Aviso**: Este projeto foi desenvolvido e testado exclusivamente no **Acer Predator PHN16-72**. Não há garantia de funcionamento em outros modelos.
 
-Este projeto funciona **exclusivamente** com notebooks Acer que possuem interface WMI para controle de fans:
+## Pré-requisito: nekro-sense
 
-- **Acer Predator** (Helios, Triton, etc.)
-- **Acer Nitro** (Nitro 5, Nitro 7, etc.)
+Este projeto depende do módulo kernel [nekro-sense](https://github.com/fredac100/nekro-sense) para comunicação com o hardware. Ele deve ser instalado **antes** do Fan Aggressor:
 
-Requer o módulo kernel [nekro-sense](https://github.com/fredac100/nekro-sense) instalado e funcionando.
+```bash
+git clone https://github.com/fredac100/nekro-sense.git
+cd nekro-sense
+make
+sudo make install
+```
+
+O nekro-sense substitui o driver `acer_wmi` do kernel e expõe controles de ventiladores, RGB e perfis de energia via sysfs.
 
 ## Funcionalidades
 
