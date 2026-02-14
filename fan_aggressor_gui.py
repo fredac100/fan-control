@@ -657,10 +657,26 @@ class FanAggressorApp(Adw.Application):
             self.boost_label.remove_css_class("accent")
             self.boost_label.add_css_class("dim-label")
 
-        self.cpu_gov_status_label.set_text(get_current_governor())
-        turbo = get_turbo_enabled()
-        self.cpu_turbo_status_label.set_text("ON" if turbo else "OFF")
-        self.cpu_epp_status_label.set_text(get_current_epp())
+        current_gov = get_current_governor()
+        current_turbo = get_turbo_enabled()
+        current_epp = get_current_epp()
+
+        self.cpu_gov_status_label.set_text(current_gov)
+        self.cpu_turbo_status_label.set_text("ON" if current_turbo else "OFF")
+        self.cpu_epp_status_label.set_text(current_epp)
+
+        self.updating = True
+        gov_list = get_available_governors() or ["powersave", "performance"]
+        if current_gov in gov_list:
+            self.governor_row.set_selected(gov_list.index(current_gov))
+        self.turbo_row.set_active(current_turbo)
+        epp_list = get_available_epp() or [
+            "default", "performance", "balance_performance",
+            "balance_power", "power"
+        ]
+        if current_epp in epp_list:
+            self.epp_row.set_selected(epp_list.index(current_epp))
+        self.updating = False
 
     def _auto_refresh(self) -> bool:
         self._refresh_all()

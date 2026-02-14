@@ -7,14 +7,23 @@ from pathlib import Path
 
 PLATFORM_PROFILE = Path("/sys/firmware/acpi/platform_profile")
 EPP_CPU0 = Path("/sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference")
+NO_TURBO = Path("/sys/devices/system/cpu/intel_pstate/no_turbo")
 CPU_BASE = Path("/sys/devices/system/cpu")
 
 PROFILE_TO_EPP = {
     "low-power": "power",
-    "quiet": "balance_power",
+    "quiet": "power",
     "balanced": "balance_power",
     "balanced-performance": "balance_performance",
     "performance": "performance",
+}
+
+PROFILE_TURBO = {
+    "low-power": False,
+    "quiet": False,
+    "balanced": True,
+    "balanced-performance": True,
+    "performance": True,
 }
 
 
@@ -42,6 +51,22 @@ def set_epp(value: str) -> bool:
     return success
 
 
+def set_turbo(enabled: bool) -> bool:
+    try:
+        NO_TURBO.write_text("0" if enabled else "1")
+        return True
+    except (PermissionError, OSError):
+        return False
+
+
+def get_turbo() -> bool:
+    try:
+        val = NO_TURBO.read_text().strip()
+        return val == "0"
+    except (FileNotFoundError, PermissionError, OSError):
+        return True
+
+
 def main():
     running = True
 
@@ -53,24 +78,51 @@ def main():
     signal.signal(signal.SIGINT, stop)
 
     last_profile = ""
+    last_log = {}
     print("EPP Override iniciado")
 
     while running:
         profile = read_profile()
-        if profile and profile != last_profile:
-            expected_epp = PROFILE_TO_EPP.get(profile)
-            if expected_epp:
-                current_epp = read_epp()
+        if not profile:
+            time.sleep(1)
+            continue
+
+        expected_epp = PROFILE_TO_EPP.get(profile)
+        expected_turbo = PROFILE_TURBO.get(profile)
+
+        if expected_epp or expected_turbo is not None:
+            profile_changed = profile != last_profile
+            if profile_changed:
                 time.sleep(0.3)
-                current_epp = read_epp()
-                if current_epp != expected_epp:
-                    if set_epp(expected_epp):
-                        print(f"[{profile}] EPP: {current_epp} -> {expected_epp}")
-                    else:
-                        print(f"[{profile}] Falha ao definir EPP {expected_epp}")
+
+            current_epp = read_epp()
+            current_turbo = get_turbo()
+
+            changed = []
+
+            if expected_epp and current_epp != expected_epp:
+                if set_epp(expected_epp):
+                    changed.append(f"EPP: {current_epp} -> {expected_epp}")
                 else:
-                    print(f"[{profile}] EPP já correto: {current_epp}")
-            last_profile = profile
+                    changed.append(f"EPP: falha")
+
+            if expected_turbo is not None and current_turbo != expected_turbo:
+                if set_turbo(expected_turbo):
+                    turbo_state = "ON" if expected_turbo else "OFF"
+                    changed.append(f"Turbo: {turbo_state}")
+                else:
+                    changed.append(f"Turbo: falha")
+
+            current_state = (current_epp, current_turbo)
+            if changed:
+                print(f"[{profile}] {', '.join(changed)}")
+                last_log[profile] = current_state
+            elif profile_changed and last_log.get(profile) != current_state:
+                turbo_state = "ON" if current_turbo else "OFF"
+                print(f"[{profile}] EPP={current_epp}, Turbo={turbo_state}")
+                last_log[profile] = current_state
+
+        last_profile = profile
         time.sleep(1)
 
     print("EPP Override finalizado")
