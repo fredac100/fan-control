@@ -13,7 +13,7 @@ CPU_BASE = "/sys/devices/system/cpu"
 PLATFORM_PROFILE = "/sys/firmware/acpi/platform_profile"
 
 EPP_TO_PROFILE = {
-    "power": "low-power",
+    "power": "quiet",
     "balance_power": "balanced",
     "balance_performance": "balanced-performance",
     "performance": "performance",
@@ -74,12 +74,12 @@ def get_current_epp() -> str:
     return _read_sysfs(f"{CPU_BASE}/cpu0/{EPP_PREF}") or "unknown"
 
 
-def set_epp(pref: str) -> bool:
+def set_epp(pref: str, platform_profile: str = None) -> bool:
     available = get_available_epp()
     if available and pref not in available:
         return False
 
-    profile = EPP_TO_PROFILE.get(pref)
+    profile = platform_profile or EPP_TO_PROFILE.get(pref)
     if profile:
         _write_sysfs(PLATFORM_PROFILE, profile)
 
@@ -99,6 +99,10 @@ def set_turbo(enabled: bool) -> bool:
     return _write_sysfs(NO_TURBO, "0" if enabled else "1")
 
 
+def get_platform_profile() -> str:
+    return _read_sysfs(PLATFORM_PROFILE) or "unknown"
+
+
 def apply_cpu_power(config: dict) -> None:
     governor = config.get("cpu_governor")
     if governor:
@@ -110,4 +114,5 @@ def apply_cpu_power(config: dict) -> None:
 
     epp = config.get("cpu_epp")
     if epp:
-        set_epp(epp)
+        pp = config.get("cpu_platform_profile") or None
+        set_epp(epp, platform_profile=pp)

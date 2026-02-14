@@ -144,6 +144,7 @@ class FanAggressor:
             "cpu_governor": "powersave",
             "cpu_turbo_enabled": True,
             "cpu_epp": "balance_performance",
+            "cpu_platform_profile": "",
             "nekroctl_path": None,
             "failsafe_mode": "auto"
         }
@@ -291,7 +292,8 @@ class FanAggressor:
         return (
             self.config.get("cpu_governor"),
             self.config.get("cpu_turbo_enabled"),
-            self.config.get("cpu_epp")
+            self.config.get("cpu_epp"),
+            self.config.get("cpu_platform_profile", "")
         )
 
     def daemon(self):

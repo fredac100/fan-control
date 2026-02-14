@@ -30,7 +30,7 @@ from fan_monitor import FanMonitor, rpm_to_percent
 from cpu_power import (
     get_available_governors, get_current_governor,
     get_available_epp, get_current_epp,
-    get_turbo_enabled,
+    get_turbo_enabled, get_platform_profile,
     set_governor, set_epp, set_turbo
 )
 
@@ -51,6 +51,7 @@ def load_config() -> Dict[str, Any]:
         "cpu_governor": "powersave",
         "cpu_turbo_enabled": True,
         "cpu_epp": "balance_performance",
+        "cpu_platform_profile": "",
         "link_offsets": True,
         "nekroctl_path": None,
         "failsafe_mode": "auto"
@@ -448,14 +449,21 @@ class FanAggressorApp(Adw.Application):
         self.profile_icons = {}
 
         profiles = [
+            ("deepsleep", "Deep Sleep", "Economia extrema, CPU no minimo absoluto",
+             {"cpu_governor": "powersave", "cpu_turbo_enabled": False, "cpu_epp": "power",
+              "cpu_platform_profile": "low-power"}),
             ("stealth", "Stealth Mode", "Silencioso, sem turbo, economia total",
-             {"cpu_governor": "powersave", "cpu_turbo_enabled": False, "cpu_epp": "power"}),
+             {"cpu_governor": "powersave", "cpu_turbo_enabled": False, "cpu_epp": "power",
+              "cpu_platform_profile": ""}),
             ("cruise", "Cruise Control", "Equilibrado, turbo sob demanda",
-             {"cpu_governor": "powersave", "cpu_turbo_enabled": True, "cpu_epp": "balance_power"}),
+             {"cpu_governor": "powersave", "cpu_turbo_enabled": True, "cpu_epp": "balance_power",
+              "cpu_platform_profile": ""}),
             ("boost", "Boost Drive", "Alta performance com eficiencia",
-             {"cpu_governor": "powersave", "cpu_turbo_enabled": True, "cpu_epp": "balance_performance"}),
+             {"cpu_governor": "powersave", "cpu_turbo_enabled": True, "cpu_epp": "balance_performance",
+              "cpu_platform_profile": ""}),
             ("nitro", "Nitro Overdrive", "Performance maxima, sem limites",
-             {"cpu_governor": "performance", "cpu_turbo_enabled": True, "cpu_epp": "performance"}),
+             {"cpu_governor": "performance", "cpu_turbo_enabled": True, "cpu_epp": "performance",
+              "cpu_platform_profile": ""}),
         ]
 
         for profile_id, title, subtitle, settings in profiles:
@@ -504,29 +512,37 @@ class FanAggressorApp(Adw.Application):
         current_gov = get_current_governor()
         current_turbo = get_turbo_enabled()
         current_epp = get_current_epp()
+        current_pp = get_platform_profile()
 
-        profile_map = {
-            ("powersave", False, "power"): "stealth",
-            ("powersave", True, "balance_power"): "cruise",
-            ("powersave", True, "balance_performance"): "boost",
-            ("performance", True, "performance"): "nitro",
-        }
-
-        active = profile_map.get((current_gov, current_turbo, current_epp))
+        if current_gov == "powersave" and not current_turbo and current_epp == "power":
+            if current_pp == "low-power":
+                active = "deepsleep"
+            else:
+                active = "stealth"
+        else:
+            profile_map = {
+                ("powersave", True, "balance_power"): "cruise",
+                ("powersave", True, "balance_performance"): "boost",
+                ("performance", True, "performance"): "nitro",
+            }
+            active = profile_map.get((current_gov, current_turbo, current_epp))
 
         for pid, icon in self.profile_icons.items():
             btn = self.profile_buttons[pid]
+            for css in ("success", "accent"):
+                btn.remove_css_class(css)
             if pid == active:
                 icon.set_from_icon_name("emblem-ok-symbolic")
                 btn.set_label("Active")
                 btn.set_sensitive(False)
-                btn.remove_css_class("suggested-action")
-                btn.add_css_class("success")
+                if pid == "deepsleep":
+                    btn.add_css_class("accent")
+                else:
+                    btn.add_css_class("success")
             else:
                 icon.set_from_icon_name(None)
                 btn.set_label("Activate")
                 btn.set_sensitive(True)
-                btn.remove_css_class("success")
 
     def _on_cpu_power_changed(self, widget, _):
         if self.updating:
@@ -544,6 +560,8 @@ class FanAggressorApp(Adw.Application):
         if epp_item:
             self.config["cpu_epp"] = epp_item
 
+        self.config["cpu_platform_profile"] = ""
+
         self._save_config()
         self._apply_cpu_power()
         self._update_profile_indicator()
@@ -552,8 +570,10 @@ class FanAggressorApp(Adw.Application):
         gov = self.config.get("cpu_governor")
         turbo = self.config.get("cpu_turbo_enabled", True)
         epp = self.config.get("cpu_epp")
+        pp = self.config.get("cpu_platform_profile") or None
+        pp_arg = f", platform_profile='{pp}'" if pp else ""
 
-        if set_governor(gov) and set_turbo(turbo) and set_epp(epp):
+        if set_governor(gov) and set_turbo(turbo) and set_epp(epp, platform_profile=pp):
             return
 
         def _worker():
@@ -561,7 +581,7 @@ class FanAggressorApp(Adw.Application):
                 f"import sys; sys.path.insert(0, '{Path(__file__).parent}'); "
                 f"sys.path.insert(0, '/usr/local/lib/fan-aggressor'); "
                 f"from cpu_power import set_governor, set_turbo, set_epp; "
-                f"set_governor('{gov}'); set_turbo({turbo}); set_epp('{epp}')"
+                f"set_governor('{gov}'); set_turbo({turbo}); set_epp('{epp}'{pp_arg})"
             )
             try:
                 subprocess.run(
