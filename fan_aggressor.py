@@ -8,7 +8,7 @@ import argparse
 import signal
 import subprocess
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 for _p in [str(Path(__file__).parent), "/usr/local/lib/fan-aggressor"]:
     if _p not in sys.path:
@@ -20,26 +20,50 @@ from cpu_power import (
     get_current_epp
 )
 
-NEKROCTL = "/home/fred/nekro-sense/tools/nekroctl.py"
 CONFIG_FILE = Path("/etc/fan-aggressor/config.json")
 PID_FILE = "/var/run/fan-aggressor.pid"
 STATE_FILE = Path("/var/run/fan-aggressor.state")
 
+DEFAULT_NEKROCTL_CANDIDATES = [
+    "/home/fred/nekro-sense/tools/nekroctl.py",
+    "/usr/local/bin/nekroctl.py",
+    "/usr/local/bin/nekroctl",
+    "/usr/bin/nekroctl",
+    "/opt/nekro-sense/tools/nekroctl.py",
+]
 
-def set_fan_speed(cpu: int, gpu: int) -> bool:
+
+def _find_nekroctl(config: Dict) -> Optional[str]:
+    explicit = config.get("nekroctl_path")
+    if explicit:
+        if os.path.exists(explicit) and os.access(explicit, os.X_OK):
+            return explicit
+        return None
+
+    env_path = os.getenv("NEKROCTL")
+    if env_path and os.path.exists(env_path) and os.access(env_path, os.X_OK):
+        return env_path
+
+    for candidate in DEFAULT_NEKROCTL_CANDIDATES:
+        if os.path.exists(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+def set_fan_speed(nekroctl: str, cpu: int, gpu: int) -> bool:
     cpu = max(0, min(100, cpu))
     gpu = max(0, min(100, gpu))
     try:
-        subprocess.run([NEKROCTL, "fan", "set", str(cpu), str(gpu)],
+        subprocess.run([nekroctl, "fan", "set", str(cpu), str(gpu)],
                       check=True, capture_output=True)
         return True
     except subprocess.CalledProcessError:
         return False
 
 
-def set_fan_auto() -> bool:
+def set_fan_auto(nekroctl: str) -> bool:
     try:
-        subprocess.run([NEKROCTL, "fan", "auto"], check=True, capture_output=True)
+        subprocess.run([nekroctl, "fan", "auto"], check=True, capture_output=True)
         return True
     except subprocess.CalledProcessError:
         return False
@@ -68,9 +92,9 @@ def clear_state():
         pass
 
 
-def get_fan_speed() -> tuple:
+def get_fan_speed(nekroctl: str) -> tuple:
     try:
-        result = subprocess.run([NEKROCTL, "fan", "get"],
+        result = subprocess.run([nekroctl, "fan", "get"],
                                capture_output=True, text=True, check=True)
         parts = result.stdout.strip().split(",")
         if len(parts) == 2:
@@ -104,6 +128,9 @@ class FanAggressor:
         self.last_cpu = -1
         self.last_gpu = -1
         self.is_boosting = False
+        self.fan_failures = 0
+        self.nekroctl_path = _find_nekroctl(self.config)
+        self.nekroctl_missing_logged = False
 
     def _load_config(self) -> Dict:
         default = {
@@ -116,7 +143,9 @@ class FanAggressor:
             "temp_threshold_disengage": 65,
             "cpu_governor": "powersave",
             "cpu_turbo_enabled": True,
-            "cpu_epp": "balance_performance"
+            "cpu_epp": "balance_performance",
+            "nekroctl_path": None,
+            "failsafe_mode": "auto"
         }
         if self.config_path.exists():
             try:
@@ -126,13 +155,53 @@ class FanAggressor:
                         if key in loaded:
                             default[key] = loaded[key]
             except json.JSONDecodeError:
-                pass
-        return default
+                if hasattr(self, "config"):
+                    return self._sanitize_config(self.config)
+                return self._sanitize_config(default)
+        return self._sanitize_config(default)
+
+    def _sanitize_config(self, config: Dict) -> Dict:
+        config["cpu_fan_offset"] = int(config.get("cpu_fan_offset", 0))
+        config["gpu_fan_offset"] = int(config.get("gpu_fan_offset", 0))
+        config["cpu_fan_offset"] = max(-100, min(100, config["cpu_fan_offset"]))
+        config["gpu_fan_offset"] = max(-100, min(100, config["gpu_fan_offset"]))
+
+        try:
+            poll_interval = float(config.get("poll_interval", 1.0))
+        except (TypeError, ValueError):
+            poll_interval = 1.0
+        if poll_interval <= 0:
+            poll_interval = 1.0
+        config["poll_interval"] = poll_interval
+
+        try:
+            engage = int(config.get("temp_threshold_engage", 70))
+        except (TypeError, ValueError):
+            engage = 70
+        try:
+            disengage = int(config.get("temp_threshold_disengage", 65))
+        except (TypeError, ValueError):
+            disengage = 65
+        if disengage >= engage:
+            disengage = engage - 5
+        config["temp_threshold_engage"] = engage
+        config["temp_threshold_disengage"] = disengage
+
+        failsafe = config.get("failsafe_mode", "auto")
+        if failsafe not in ("auto", "max"):
+            failsafe = "auto"
+        config["failsafe_mode"] = failsafe
+
+        nekroctl_path = config.get("nekroctl_path")
+        config["nekroctl_path"] = nekroctl_path if nekroctl_path else None
+        return config
 
     def _save_config(self):
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.config_path, 'w') as f:
+        tmp_path = self.config_path.with_suffix(".tmp")
+        with open(tmp_path, 'w') as f:
             json.dump(self.config, f, indent=2)
+        os.replace(tmp_path, self.config_path)
 
     def set_offset(self, fan: str, offset: int):
         offset = max(-100, min(100, offset))
@@ -149,12 +218,15 @@ class FanAggressor:
     def disable(self):
         self.config["enabled"] = False
         self._save_config()
-        set_fan_auto()
+        if self.nekroctl_path:
+            set_fan_auto(self.nekroctl_path)
 
     def status(self):
         speeds = self.monitor.get_fan_speeds()
         temps = self.monitor.get_temps()
-        fan_cpu, fan_gpu = get_fan_speed()
+        fan_cpu, fan_gpu = (None, None)
+        if self.nekroctl_path:
+            fan_cpu, fan_gpu = get_fan_speed(self.nekroctl_path)
 
         print(f"Status: {'ATIVO' if self.config['enabled'] else 'INATIVO'}")
         hybrid = self.config.get('hybrid_mode', True)
@@ -190,7 +262,10 @@ class FanAggressor:
             for name, val in temps.items():
                 print(f"  {name}: {val:.1f}°C")
             max_temp = self.monitor.get_max_temp()
-            print(f"  Max: {max_temp:.1f}°C")
+            if max_temp is not None:
+                print(f"  Max: {max_temp:.1f}°C")
+            else:
+                print("  Max: indisponível")
 
             if hybrid and speeds:
                 fan1_rpm = speeds.get('fan1', 0)
@@ -205,9 +280,12 @@ class FanAggressor:
                 else:
                     print(f"  -> Em modo AUTO (temp {max_temp:.0f}°C < {self.config.get('temp_threshold_engage', 70)}°C)")
             else:
-                base_duty = temp_to_duty(max_temp)
-                print(f"\nCurva fixa para {max_temp:.0f}°C: {base_duty}%")
-                print(f"Com offset +{self.config['cpu_fan_offset']}%: {min(100, base_duty + self.config['cpu_fan_offset'])}%")
+                if max_temp is not None:
+                    base_duty = temp_to_duty(max_temp)
+                    print(f"\nCurva fixa para {max_temp:.0f}°C: {base_duty}%")
+                    print(f"Com offset +{self.config['cpu_fan_offset']}%: {min(100, base_duty + self.config['cpu_fan_offset'])}%")
+                else:
+                    print("\nCurva fixa: temperatura indisponível")
 
     def _get_cpu_power_state(self) -> tuple:
         return (
@@ -242,7 +320,8 @@ class FanAggressor:
         if hybrid:
             print(f"Threshold engage: {self.config.get('temp_threshold_engage', 70)}°C")
             print(f"Threshold disengage: {self.config.get('temp_threshold_disengage', 65)}°C")
-            set_fan_auto()
+            if self.nekroctl_path:
+                set_fan_auto(self.nekroctl_path)
             clear_state()
             print("Iniciando em modo AUTO...")
             time.sleep(2)
@@ -250,6 +329,7 @@ class FanAggressor:
         try:
             while self.running:
                 self.config = self._load_config()
+                self.nekroctl_path = _find_nekroctl(self.config)
                 hybrid = self.config.get('hybrid_mode', True)
 
                 current_cpu_power = self._get_cpu_power_state()
@@ -262,7 +342,8 @@ class FanAggressor:
 
                 if not self.config["enabled"]:
                     if self.last_cpu != -1 or self.is_boosting:
-                        set_fan_auto()
+                        if self.nekroctl_path:
+                            set_fan_auto(self.nekroctl_path)
                         clear_state()
                         self.last_cpu = -1
                         self.last_gpu = -1
@@ -270,7 +351,27 @@ class FanAggressor:
                     time.sleep(1)
                     continue
 
+                if not self.nekroctl_path:
+                    if not self.nekroctl_missing_logged:
+                        print("Erro: nekroctl não encontrado. Verifique 'nekroctl_path' no config ou variável NEKROCTL.")
+                        self.nekroctl_missing_logged = True
+                    time.sleep(2)
+                    continue
+                self.nekroctl_missing_logged = False
+
                 temp = self.monitor.get_max_temp()
+                if temp is None or temp < 0 or temp > 120:
+                    if self.config.get("failsafe_mode") == "max":
+                        if set_fan_speed(self.nekroctl_path, 100, 100):
+                            write_state(True, 0, 0, 100, 100)
+                        else:
+                            print("Falha ao aplicar fail-safe MAX")
+                    else:
+                        if not set_fan_auto(self.nekroctl_path):
+                            print("Falha ao aplicar fail-safe AUTO")
+                        clear_state()
+                    time.sleep(self.config["poll_interval"])
+                    continue
                 cpu_offset = self.config["cpu_fan_offset"]
                 gpu_offset = self.config["gpu_fan_offset"]
                 threshold_engage = self.config.get('temp_threshold_engage', 70)
@@ -284,7 +385,7 @@ class FanAggressor:
                         print(f"[{temp:.0f}°C] Boost ATIVADO")
                     elif self.is_boosting and temp < threshold_disengage:
                         self.is_boosting = False
-                        set_fan_auto()
+                        set_fan_auto(self.nekroctl_path)
                         clear_state()
                         self.last_cpu = -1
                         self.last_gpu = -1
@@ -298,11 +399,15 @@ class FanAggressor:
                         new_gpu = max(0, min(100, base_duty + gpu_offset))
 
                         if new_cpu != self.last_cpu or new_gpu != self.last_gpu:
-                            set_fan_speed(new_cpu, new_gpu)
-                            write_state(True, cpu_offset, gpu_offset, base_duty, base_duty)
-                            self.last_cpu = new_cpu
-                            self.last_gpu = new_gpu
-                            print(f"[{temp:.0f}°C] Fans: CPU {new_cpu}% ({base_duty}%+{cpu_offset}), GPU {new_gpu}% ({base_duty}%+{gpu_offset})")
+                            if set_fan_speed(self.nekroctl_path, new_cpu, new_gpu):
+                                self.fan_failures = 0
+                                write_state(True, cpu_offset, gpu_offset, base_duty, base_duty)
+                                self.last_cpu = new_cpu
+                                self.last_gpu = new_gpu
+                                print(f"[{temp:.0f}°C] Fans: CPU {new_cpu}% ({base_duty}%+{cpu_offset}), GPU {new_gpu}% ({base_duty}%+{gpu_offset})")
+                            else:
+                                self.fan_failures += 1
+                                print("Falha ao setar fans (boost)")
                     else:
                         time.sleep(self.config["poll_interval"])
                         continue
@@ -312,15 +417,31 @@ class FanAggressor:
                     new_gpu = max(0, min(100, base_duty + gpu_offset))
 
                     if new_cpu != self.last_cpu or new_gpu != self.last_gpu:
-                        set_fan_speed(new_cpu, new_gpu)
-                        write_state(True, cpu_offset, gpu_offset, base_duty, base_duty)
-                        self.last_cpu = new_cpu
-                        self.last_gpu = new_gpu
+                        if set_fan_speed(self.nekroctl_path, new_cpu, new_gpu):
+                            self.fan_failures = 0
+                            write_state(True, cpu_offset, gpu_offset, base_duty, base_duty)
+                            self.last_cpu = new_cpu
+                            self.last_gpu = new_gpu
+                        else:
+                            self.fan_failures += 1
+                            print("Falha ao setar fans (curva fixa)")
+
+                if self.fan_failures >= 3:
+                    print("Múltiplas falhas ao controlar fans; retornando ao AUTO")
+                    set_fan_auto(self.nekroctl_path)
+                    clear_state()
+                    self.last_cpu = -1
+                    self.last_gpu = -1
+                    self.is_boosting = False
+                    self.fan_failures = 0
+                    time.sleep(5)
+                    continue
 
                 time.sleep(self.config["poll_interval"])
 
         finally:
-            set_fan_auto()
+            if self.nekroctl_path:
+                set_fan_auto(self.nekroctl_path)
             clear_state()
             if os.path.exists(PID_FILE):
                 os.remove(PID_FILE)

@@ -34,6 +34,10 @@ Restart=on-failure
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/etc/fan-aggressor /var/run
 
 [Install]
 WantedBy=multi-user.target

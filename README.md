@@ -191,7 +191,9 @@ Arquivo: `/etc/fan-aggressor/config.json`
   "temp_threshold_disengage": 65,
   "cpu_governor": "powersave",
   "cpu_turbo_enabled": true,
-  "cpu_epp": "balance_performance"
+  "cpu_epp": "balance_performance",
+  "nekroctl_path": null,
+  "failsafe_mode": "auto"
 }
 ```
 
@@ -206,6 +208,8 @@ Arquivo: `/etc/fan-aggressor/config.json`
 | `hybrid_mode` | Se true, usa thresholds; se false, controla sempre | true/false |
 | `temp_threshold_engage` | Temperatura para ativar boost | °C (padrão: 70) |
 | `temp_threshold_disengage` | Temperatura para voltar ao auto | °C (padrão: 65) |
+| `nekroctl_path` | Caminho do nekroctl (override) | caminho absoluto ou null |
+| `failsafe_mode` | Fail-safe em erro de sensores | `auto` ou `max` |
 
 ### Parâmetros de CPU Power
 

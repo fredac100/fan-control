@@ -5,11 +5,16 @@ After=multi-user.target
 [Service]
 Type=simple
 ExecStartPre=-/sbin/modprobe ec_sys write_support=1
+Environment=PYTHONPATH=/usr/local/lib/fan-aggressor
 ExecStart=/usr/local/bin/fan_aggressor daemon
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/etc/fan-aggressor /var/run
 
 [Install]
 WantedBy=multi-user.target
