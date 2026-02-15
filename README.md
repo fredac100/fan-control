@@ -6,16 +6,9 @@ Controle dinâmico de ventiladores e gerenciamento de energia CPU para o **Acer 
 
 ## Pré-requisito: nekro-sense
 
-Este projeto depende do módulo kernel [nekro-sense](https://github.com/fredac100/nekro-sense) para comunicação com o hardware. Ele deve ser instalado **antes** do Fan Aggressor:
+Este projeto depende do módulo kernel [nekro-sense](https://github.com/fredac100/nekro-sense) para comunicação com o hardware via WMI. O nekro-sense substitui o driver `acer_wmi` do kernel e expõe controles de ventiladores, RGB e perfis de energia via sysfs.
 
-```bash
-git clone https://github.com/fredac100/nekro-sense.git
-cd nekro-sense
-make
-sudo make install
-```
-
-O nekro-sense substitui o driver `acer_wmi` do kernel e expõe controles de ventiladores, RGB e perfis de energia via sysfs.
+**Instalação detalhada na seção "Instalação" abaixo.**
 
 ## Funcionalidades
 
@@ -44,29 +37,26 @@ O nekro-sense substitui o driver `acer_wmi` do kernel e expõe controles de vent
 
 ### Modo Híbrido (Recomendado)
 
-1. Sistema fica no **modo AUTO** enquanto temperatura está baixa
-2. Quando temperatura atinge o **threshold de engage** (ex: 70°C), ativa o boost
-3. Aplica **curva dinâmica + offset** configurado
-4. Quando temperatura cai abaixo do **threshold de disengage** (ex: 65°C), volta ao AUTO
+1. Sistema fica no **modo AUTO** enquanto temperatura está baixa (< threshold engage)
+2. Quando temperatura atinge o **threshold de engage** (padrão: 70°C):
+   - Captura um **snapshot** do RPM atual dos fans (curva do fabricante)
+   - Converte para duty cycle percentual (0-100%)
+   - Ativa o offset
+3. Aplica **curva do fabricante (snapshot) + offset** configurado
+4. Mantém esse snapshot como base fixa enquanto o offset estiver ativo
+5. Quando temperatura cai abaixo do **threshold de disengage** (padrão: 65°C), desativa offset e volta ao AUTO
 
-### Curva de Temperatura Base
+**Conceito-chave**: O sistema **não substitui** a curva do fabricante. Ele apenas **adiciona** o offset configurado sobre a curva natural que o hardware já aplica.
 
-| Temperatura | Velocidade Base |
-|-------------|-----------------|
-| < 50°C      | 0%              |
-| 50-60°C     | 0-20%           |
-| 60-70°C     | 20-45%          |
-| 70-80°C     | 45-75%          |
-| 80-90°C     | 75-100%         |
-| > 90°C      | 100%            |
+### Exemplo Prático (Offset +10%)
 
-### Exemplo com Offset +15%
+No momento da ativação (60°C):
+- RPM do CPU fan: 2500 RPM → ~33% duty cycle (base da curva do fabricante)
+- RPM do GPU fan: 2100 RPM → ~28% duty cycle
+- **Offset aplicado**: +10%
+- **Fan final setado**: CPU 43%, GPU 38%
 
-| Temperatura | Base | + Offset | Final |
-|-------------|------|----------|-------|
-| 55°C        | 10%  | +15%     | 25%   |
-| 65°C        | 32%  | +15%     | 47%   |
-| 75°C        | 60%  | +15%     | 75%   |
+O snapshot permanece fixo até a temperatura cair abaixo do disengage ou variar significativamente.
 
 ### EPP Override para Botão Predator
 
@@ -103,6 +93,23 @@ O perfil ativo é indicado visualmente. Os perfis sincronizam com o botão físi
 
 ## Instalação
 
+### 1. Instalar nekro-sense (pré-requisito)
+
+```bash
+git clone https://github.com/fredac100/nekro-sense.git
+cd nekro-sense
+make
+sudo make install
+sudo modprobe nekro_sense
+```
+
+Verifique se o módulo carregou:
+```bash
+lsmod | grep nekro
+```
+
+### 2. Instalar Fan Aggressor
+
 ```bash
 git clone https://github.com/fredac100/fan-control.git
 cd fan-control
@@ -117,23 +124,36 @@ Isso instala:
 - `/etc/systemd/system/fan-aggressor.service` - Serviço do daemon
 - `/etc/systemd/system/epp-override.service` - Serviço de correção EPP
 
-### Instalar GUI
+### 3. Habilitar e Iniciar Serviços
+
+```bash
+# Habilitar controle de fans
+sudo fan_aggressor enable
+
+# Iniciar daemon
+sudo systemctl enable --now fan-aggressor
+
+# Correção de EPP (opcional, recomendado para botão Predator)
+sudo systemctl enable --now epp-override
+```
+
+### 4. Verificar Funcionamento
+
+```bash
+# Ver status
+sudo fan_aggressor status
+
+# Ver logs em tempo real
+journalctl -u fan-aggressor -f
+```
+
+### 5. Instalar GUI (Opcional)
 
 ```bash
 ./install_gui.sh
 ```
 
 Isso instala o ícone e adiciona entrada no menu de aplicações.
-
-### Habilitar Serviços
-
-```bash
-# Daemon principal
-sudo systemctl enable --now fan-aggressor
-
-# Correção de EPP (opcional, mas recomendado para Predator)
-sudo systemctl enable --now epp-override
-```
 
 ## Uso
 
@@ -159,15 +179,19 @@ fan_aggressor status
 
 Mostra:
 - Status do daemon (enabled/disabled)
+- Modo (híbrido/curva fixa)
+- Offsets configurados (CPU/GPU)
+- Thresholds (engage/disengage)
+- Duty atual via nekroctl
 - Fan speeds (RPM e % estimado)
-- Temperaturas (CPU, GPU)
+- Temperaturas (todas + máxima)
 - CPU Power (governor, turbo boost, EPP)
-- Modo híbrido e boost status
+- Cálculo híbrido (base do fabricante + offset = final)
 
 #### Configurar offset
 
 ```bash
-# Aumentar agressividade
+# Aumentar agressividade (+10% a +30% recomendado)
 fan_aggressor set both +15
 
 # CPU e GPU separados
@@ -176,14 +200,35 @@ fan_aggressor set gpu +10
 
 # Reduzir ruído (cuidado com temperaturas!)
 fan_aggressor set both -10
+
+# Resetar ao padrão
+fan_aggressor set both 0
 ```
+
+**Nota**: Mudanças de offset são aplicadas imediatamente pelo daemon se estiver rodando.
 
 #### Habilitar/Desabilitar
 
 ```bash
+# Habilitar controle de fans
 fan_aggressor enable
+
+# Desabilitar (volta ao modo AUTO do hardware)
 fan_aggressor disable
 ```
+
+#### Alterar thresholds
+
+Edite `/etc/fan-aggressor/config.json`:
+
+```json
+{
+  "temp_threshold_engage": 60,
+  "temp_threshold_disengage": 55
+}
+```
+
+O daemon recarrega o config automaticamente a cada ciclo.
 
 ### Serviço Systemd
 
@@ -207,7 +252,7 @@ Arquivo: `/etc/fan-aggressor/config.json`
 {
   "cpu_fan_offset": 0,
   "gpu_fan_offset": 0,
-  "enabled": false,
+  "enabled": true,
   "poll_interval": 1.0,
   "hybrid_mode": true,
   "temp_threshold_engage": 70,
@@ -215,10 +260,14 @@ Arquivo: `/etc/fan-aggressor/config.json`
   "cpu_governor": "powersave",
   "cpu_turbo_enabled": true,
   "cpu_epp": "balance_performance",
+  "cpu_platform_profile": "",
+  "link_offsets": true,
   "nekroctl_path": null,
   "failsafe_mode": "auto"
 }
 ```
+
+**Importante**: O arquivo de config é recarregado automaticamente pelo daemon a cada ciclo (poll_interval). Não é necessário reiniciar o serviço após editar.
 
 ### Parâmetros de Fans
 
@@ -374,6 +423,36 @@ sudo systemctl daemon-reload
 ```
 
 ## Troubleshooting
+
+### Fans escalam até 100% no modo híbrido
+
+Se os fans sobem gradualmente até 100% ao invés de manter o offset configurado, verifique:
+
+1. **Versão do código**: Certifique-se de ter a versão mais recente (commit `7045999` ou posterior)
+   ```bash
+   cd /home/fred/fan-control
+   git pull
+   sudo ./install.sh
+   sudo systemctl restart fan-aggressor
+   ```
+
+2. **Logs do daemon**: Verifique se o snapshot é capturado corretamente
+   ```bash
+   journalctl -u fan-aggressor -f
+   ```
+
+   Deve mostrar:
+   ```
+   [60°C] Offset ATIVADO (base snapshot: CPU 34%, GPU 35%)
+   [60°C] Fans: CPU 44% (base 34% + 10%), GPU 45% (base 35% + 10%)
+   ```
+
+   **NÃO deve mostrar** "Snapshot atualizado" repetidamente — isso indica versão antiga com bug de feedback loop.
+
+3. **Modo híbrido ativo**: Confirme no config.json:
+   ```json
+   "hybrid_mode": true
+   ```
 
 ### EPP não muda
 - Verifique se está usando governor `powersave` (com `performance`, o EPP é gerenciado pelo driver)
