@@ -94,6 +94,8 @@ install_nekro_sense() {
 
     local nekro_dir="/home/fred/nekro-sense"
 
+    local real_user="${SUDO_USER:-$USER}"
+
     if [ -d "$nekro_dir" ]; then
         log_info "Repositório encontrado em $nekro_dir, atualizando..."
         cd "$nekro_dir"
@@ -101,6 +103,7 @@ install_nekro_sense() {
     else
         log_info "Clonando repositório nekro-sense..."
         git clone --quiet "$NEKRO_REPO" "$nekro_dir"
+        chown -R "$real_user":"$real_user" "$nekro_dir"
         cd "$nekro_dir"
     fi
 
@@ -129,6 +132,8 @@ install_fan_aggressor() {
 
     local fan_dir="/home/fred/fan-control"
 
+    local real_user="${SUDO_USER:-$USER}"
+
     if [ -d "$fan_dir" ]; then
         log_info "Repositório encontrado em $fan_dir"
         cd "$fan_dir"
@@ -136,6 +141,7 @@ install_fan_aggressor() {
     else
         log_info "Clonando repositório fan-control..."
         git clone --quiet "$FAN_REPO" "$fan_dir"
+        chown -R "$real_user":"$real_user" "$fan_dir"
         cd "$fan_dir"
     fi
 
@@ -146,6 +152,9 @@ install_fan_aggressor() {
     mkdir -p /usr/local/lib/fan-aggressor
     cp fan_monitor.py /usr/local/lib/fan-aggressor/
     cp cpu_power.py /usr/local/lib/fan-aggressor/
+    chmod 644 /usr/local/lib/fan-aggressor/*.py
+    chmod 755 /usr/local/lib/fan-aggressor
+    rm -rf /usr/local/lib/fan-aggressor/__pycache__
     cp epp_override.py /usr/local/bin/epp_override
     chmod +x /usr/local/bin/epp_override
 
@@ -214,8 +223,10 @@ install_gui() {
 
     chmod +x fan_aggressor_gui.py
 
-    cp fan-aggressor.svg /usr/share/icons/hicolor/scalable/apps/ 2>/dev/null || true
-    gtk-update-icon-cache /usr/share/icons/hicolor/ 2>/dev/null || true
+    mkdir -p /usr/share/icons/hicolor/scalable/apps
+    cp fan-aggressor.svg /usr/share/icons/hicolor/scalable/apps/
+    chmod 644 /usr/share/icons/hicolor/scalable/apps/fan-aggressor.svg
+    gtk-update-icon-cache -f /usr/share/icons/hicolor/ 2>/dev/null || true
 
     local real_user="${SUDO_USER:-$USER}"
     local real_home=$(eval echo "~$real_user")
