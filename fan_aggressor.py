@@ -104,19 +104,13 @@ def get_fan_speed(nekroctl: str) -> tuple:
     return None, None
 
 
-def temp_to_duty(temp: float) -> int:
-    if temp < 60:
+def temp_to_duty(temp: float, threshold: int = 60) -> int:
+    if temp < threshold:
         return 0
-    elif temp < 70:
-        return int((temp - 60) * 1.5)
-    elif temp < 80:
-        return int(15 + (temp - 70) * 2)
-    elif temp < 90:
-        return int(35 + (temp - 80) * 2.5)
-    elif temp < 100:
-        return int(60 + (temp - 90) * 4)
-    else:
-        return 100
+    span = max(110 - threshold, 1)
+    ratio = (temp - threshold) / span
+    ratio = min(ratio, 1.0)
+    return int(30 + 70 * ratio)
 
 
 class FanAggressor:
@@ -268,18 +262,18 @@ class FanAggressor:
             else:
                 print("  Max: indisponível")
 
-            if hybrid and speeds:
-                fan1_rpm = speeds.get('fan1', 0)
-                fan2_rpm = speeds.get('fan2', 0)
-                base_cpu = rpm_to_duty(fan1_rpm)
-                base_gpu = rpm_to_duty(fan2_rpm)
-                print(f"\nModo hibrido (baseado no RPM atual):")
-                print(f"  CPU: {base_cpu}% + {self.config['cpu_fan_offset']:+d}% = {min(100, base_cpu + self.config['cpu_fan_offset'])}%")
-                print(f"  GPU: {base_gpu}% + {self.config['gpu_fan_offset']:+d}% = {min(100, base_gpu + self.config['gpu_fan_offset'])}%")
-                if max_temp >= self.config.get('temp_threshold_engage', 70):
-                    print(f"  -> Boost ATIVARIA (temp {max_temp:.0f}°C >= {self.config.get('temp_threshold_engage', 70)}°C)")
+            if hybrid:
+                engage = self.config.get('temp_threshold_engage', 60)
+                if max_temp is not None and max_temp >= engage:
+                    base_duty = temp_to_duty(max_temp, engage)
+                    cpu_total = min(100, base_duty + self.config['cpu_fan_offset'])
+                    gpu_total = min(100, base_duty + self.config['gpu_fan_offset'])
+                    print(f"\nModo hibrido - Boost ATIVO:")
+                    print(f"  Base: {base_duty}% (curva para {max_temp:.0f}°C)")
+                    print(f"  CPU: {base_duty}% {self.config['cpu_fan_offset']:+d}% = {cpu_total}%")
+                    print(f"  GPU: {base_duty}% {self.config['gpu_fan_offset']:+d}% = {gpu_total}%")
                 else:
-                    print(f"  -> Em modo AUTO (temp {max_temp:.0f}°C < {self.config.get('temp_threshold_engage', 70)}°C)")
+                    print(f"\nModo hibrido - AUTO (temp {max_temp:.0f}°C < {engage}°C)")
             else:
                 if max_temp is not None:
                     base_duty = temp_to_duty(max_temp)
@@ -397,7 +391,7 @@ class FanAggressor:
                         continue
 
                     if self.is_boosting:
-                        base_duty = temp_to_duty(temp)
+                        base_duty = temp_to_duty(temp, threshold_engage)
                         new_cpu = max(0, min(100, base_duty + cpu_offset))
                         new_gpu = max(0, min(100, base_duty + gpu_offset))
 
@@ -469,27 +463,24 @@ Exemplos:
   fan_aggressor daemon              Inicia daemon (requer root)
 
 MODO HIBRIDO (padrao):
-  - Sistema fica em AUTO ate temperatura >= threshold_engage (70C)
-  - Quando ativa, le RPM atual e adiciona offset configurado
-  - Volta ao AUTO quando temp < threshold_disengage (65C)
-  - Nao substitui a curva do sistema, apenas adiciona boost quando precisa
+  - Sistema fica em AUTO ate temperatura >= threshold_engage
+  - Ao ativar boost, calcula duty base a partir de 30% escalando ate 100%
+    proporcional a distancia entre threshold e 110C
+  - Offset configurado e somado ao duty base
+  - Volta ao AUTO quando temp < threshold_disengage
 
-  Exemplo com RPM atual = 3000 (~55%) e offset = +10%:
-    Final: 65%
+  Exemplo com threshold_engage=60, temp=70C e offset=+30%:
+    Base: 30% + 70*(70-60)/(110-60) = 44%
+    Final: 44% + 30% = 74%
 
 MODO CURVA FIXA (hybrid_mode=false no config):
-  Curva base:
-    <60C   ->  0%
-    60-70C ->  0-15%
-    70-80C -> 15-35%
-    80-90C -> 35-60%
-    90-100C -> 60-100%
-    >100C  -> 100%
+  Usa mesma curva com threshold fixo em 60C.
+  Abaixo de 60C: 0%. A partir de 60C: 30% escalando ate 100%.
 
 Config: /etc/fan-aggressor/config.json
   hybrid_mode: true/false
-  temp_threshold_engage: 70 (graus para ativar boost)
-  temp_threshold_disengage: 65 (graus para voltar ao auto)
+  temp_threshold_engage: 60 (graus para ativar boost)
+  temp_threshold_disengage: 45 (graus para voltar ao auto)
 """)
 
     sub = parser.add_subparsers(dest="cmd", metavar="COMANDO")
