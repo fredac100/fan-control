@@ -1,10 +1,11 @@
 [Desktop Entry]
 Name=Fan Aggressor
 Comment=Control fan aggression and offsets
-Exec=/home/fred/fan-control/fan_aggressor_gui.py
+Exec=/usr/local/bin/fan-aggressor-gui
 Icon=fan-aggressor
 Terminal=false
 Type=Application
 Categories=Settings;HardwareSettings;
 Keywords=fan;cooling;temperature;thermal;
 StartupNotify=true
+StartupWMClass=com.fancontrol.aggressor

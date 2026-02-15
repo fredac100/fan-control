@@ -9,9 +9,13 @@ fi
 
 echo "=== Instalando Fan Aggressor ==="
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 echo "1. Copiando executável e módulos..."
 cp fan_aggressor.py /usr/local/bin/fan_aggressor
 chmod +x /usr/local/bin/fan_aggressor
+cp fan_aggressor_gui.py /usr/local/bin/fan-aggressor-gui
+chmod +x /usr/local/bin/fan-aggressor-gui
 
 mkdir -p /usr/local/lib/fan-aggressor
 cp fan_monitor.py /usr/local/lib/fan-aggressor/
@@ -78,8 +82,6 @@ if modprobe ec_sys write_support=1 2>/dev/null; then
 else
     echo "   Módulo ec_sys não disponível (usando backend alternativo)"
 fi
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo "4. Instalando ícone e atalho no menu..."
 if [ -f "$SCRIPT_DIR/fan-aggressor.svg" ]; then

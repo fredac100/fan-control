@@ -148,6 +148,8 @@ install_fan_aggressor() {
     log_info "Instalando executáveis..."
     cp fan_aggressor.py /usr/local/bin/fan_aggressor
     chmod +x /usr/local/bin/fan_aggressor
+    cp fan_aggressor_gui.py /usr/local/bin/fan-aggressor-gui
+    chmod +x /usr/local/bin/fan-aggressor-gui
 
     mkdir -p /usr/local/lib/fan-aggressor
     cp fan_monitor.py /usr/local/lib/fan-aggressor/
