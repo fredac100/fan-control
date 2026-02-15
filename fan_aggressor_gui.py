@@ -750,7 +750,8 @@ class FanAggressorApp(Adw.Application):
         if state and state.get("active"):
             offset = state.get("cpu_offset", 0)
             base = state.get("base_cpu", 0)
-            self.boost_label.set_text(f"Active: base {base}% + {offset}% = {base + offset}%")
+            total = min(100, base + offset)
+            self.boost_label.set_text(f"Active: base {base}% + offset {offset}% = {total}%")
             self.boost_label.remove_css_class("dim-label")
             self.boost_label.add_css_class("accent")
         else:

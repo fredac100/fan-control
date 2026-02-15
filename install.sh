@@ -29,6 +29,7 @@ After=multi-user.target
 Type=simple
 ExecStartPre=-/sbin/modprobe ec_sys write_support=1
 Environment=PYTHONPATH=/usr/local/lib/fan-aggressor
+Environment=PYTHONUNBUFFERED=1
 ExecStart=/usr/local/bin/fan_aggressor daemon
 Restart=on-failure
 RestartSec=5

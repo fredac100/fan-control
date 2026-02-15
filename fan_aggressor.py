@@ -128,6 +128,9 @@ class FanAggressor:
         self.last_cpu = -1
         self.last_gpu = -1
         self.is_boosting = False
+        self.snapshot_cpu = 0
+        self.snapshot_gpu = 0
+        self.snapshot_temp = 0
         self.fan_failures = 0
         self.nekroctl_path = _find_nekroctl(self.config)
         self.nekroctl_missing_logged = False
@@ -384,33 +387,38 @@ class FanAggressor:
 
                 if hybrid:
                     if not self.is_boosting and temp >= threshold_engage:
+                        speeds = self.monitor.get_fan_speeds()
+                        self.snapshot_cpu = rpm_to_duty(speeds.get('fan1', 0)) if speeds else 0
+                        self.snapshot_gpu = rpm_to_duty(speeds.get('fan2', 0)) if speeds else 0
+                        self.snapshot_temp = temp
                         self.is_boosting = True
-                        print(f"[{temp:.0f}°C] Boost ATIVADO")
+                        print(f"[{temp:.0f}°C] Offset ATIVADO (base snapshot: CPU {self.snapshot_cpu}%, GPU {self.snapshot_gpu}%)")
                     elif self.is_boosting and temp < threshold_disengage:
                         self.is_boosting = False
+                        self.snapshot_cpu = 0
+                        self.snapshot_gpu = 0
+                        self.snapshot_temp = 0
                         set_fan_auto(self.nekroctl_path)
                         clear_state()
                         self.last_cpu = -1
                         self.last_gpu = -1
-                        print(f"[{temp:.0f}°C] Voltando ao AUTO")
+                        print(f"[{temp:.0f}°C] Offset DESATIVADO, voltando ao AUTO")
                         time.sleep(self.config["poll_interval"])
                         continue
-
                     if self.is_boosting:
-                        base_duty = temp_to_duty(temp)
-                        new_cpu = max(0, min(100, base_duty + cpu_offset))
-                        new_gpu = max(0, min(100, base_duty + gpu_offset))
+                        new_cpu = max(0, min(100, self.snapshot_cpu + cpu_offset))
+                        new_gpu = max(0, min(100, self.snapshot_gpu + gpu_offset))
 
                         if new_cpu != self.last_cpu or new_gpu != self.last_gpu:
                             if set_fan_speed(self.nekroctl_path, new_cpu, new_gpu):
                                 self.fan_failures = 0
-                                write_state(True, cpu_offset, gpu_offset, base_duty, base_duty)
+                                write_state(True, cpu_offset, gpu_offset, self.snapshot_cpu, self.snapshot_gpu)
                                 self.last_cpu = new_cpu
                                 self.last_gpu = new_gpu
-                                print(f"[{temp:.0f}°C] Fans: CPU {new_cpu}% ({base_duty}%+{cpu_offset}), GPU {new_gpu}% ({base_duty}%+{gpu_offset})")
+                                print(f"[{temp:.0f}°C] Fans: CPU {new_cpu}% (base {self.snapshot_cpu}% + {cpu_offset}%), GPU {new_gpu}% (base {self.snapshot_gpu}% + {gpu_offset}%)")
                             else:
                                 self.fan_failures += 1
-                                print("Falha ao setar fans (boost)")
+                                print("Falha ao setar fans")
                     else:
                         time.sleep(self.config["poll_interval"])
                         continue
