@@ -478,13 +478,13 @@ MODO HIBRIDO (padrao):
     Final: 65%
 
 MODO CURVA FIXA (hybrid_mode=false no config):
-  Curva base (similar ao fabricante):
-    <45C  ->  0%
-    45-55C -> 0-30%
-    55-65C -> 30-60%
-    65-75C -> 60-80%
-    75-85C -> 80-100%
-    >85C  -> 100%
+  Curva base:
+    <60C   ->  0%
+    60-70C ->  0-15%
+    70-80C -> 15-35%
+    80-90C -> 35-60%
+    90-100C -> 60-100%
+    >100C  -> 100%
 
 Config: /etc/fan-aggressor/config.json
   hybrid_mode: true/false

@@ -53,31 +53,32 @@ O nekro-sense substitui o driver `acer_wmi` do kernel e expõe controles de vent
 
 | Temperatura | Velocidade Base |
 |-------------|-----------------|
-| < 50°C      | 0%              |
-| 50-60°C     | 0-20%           |
-| 60-70°C     | 20-45%          |
-| 70-80°C     | 45-75%          |
-| 80-90°C     | 75-100%         |
-| > 90°C      | 100%            |
+| < 60°C      | 0%              |
+| 60-70°C     | 0-15%           |
+| 70-80°C     | 15-35%          |
+| 80-90°C     | 35-60%          |
+| 90-100°C    | 60-100%         |
+| > 100°C     | 100%            |
 
 ### Exemplo com Offset +15%
 
 | Temperatura | Base | + Offset | Final |
 |-------------|------|----------|-------|
-| 55°C        | 10%  | +15%     | 25%   |
-| 65°C        | 32%  | +15%     | 47%   |
-| 75°C        | 60%  | +15%     | 75%   |
+| 65°C        | 7%   | +15%     | 22%   |
+| 75°C        | 25%  | +15%     | 40%   |
+| 85°C        | 47%  | +15%     | 62%   |
 
 ### EPP Override para Botão Predator
 
-O botão físico de energia do Predator possui 4 estágios, mas o `power-profiles-daemon` mapeia incorretamente o modo `balanced` para `balance_performance` ao invés de `balance_power`. O serviço `epp-override` corrige isso automaticamente:
+O botão físico de energia do Predator alterna entre platform profiles, mas o sistema nem sempre aplica o governor, turbo e EPP corretos para cada profile. O serviço `epp-override` monitora `/sys/firmware/acpi/platform_profile` e sincroniza automaticamente os três parâmetros:
 
-| Estágio | Profile | EPP Padrão (errado) | EPP Corrigido |
-|---------|---------|---------------------|---------------|
-| 1 (ECO) | `low-power` | `power` | `power` ✓ |
-| 2 (BALANCED) | `balanced` | `balance_performance` | **`balance_power`** |
-| 3 (PERFORMANCE) | `balanced-performance` | `balance_performance` | `balance_performance` ✓ |
-| 4 (TURBO) | `performance` | `performance` | `performance` ✓ |
+| Profile | Governor | Turbo | EPP |
+|---------|----------|-------|-----|
+| `low-power` | powersave | OFF | `power` |
+| `quiet` | powersave | OFF | `power` |
+| `balanced` | powersave | ON | **`balance_power`** |
+| `balanced-performance` | powersave | ON | `balance_performance` |
+| `performance` | performance | ON | `performance` |
 
 ### Power Profiles (GUI)
 
@@ -215,6 +216,7 @@ Arquivo: `/etc/fan-aggressor/config.json`
   "cpu_governor": "powersave",
   "cpu_turbo_enabled": true,
   "cpu_epp": "balance_performance",
+  "cpu_platform_profile": "",
   "nekroctl_path": null,
   "failsafe_mode": "auto"
 }
@@ -253,8 +255,11 @@ Defina um caminho absoluto apenas se estiver em local não-padrão.
 | `cpu_governor` | Governor do CPU | `powersave`, `performance` |
 | `cpu_turbo_enabled` | Intel Turbo Boost | true/false |
 | `cpu_epp` | Energy Performance Preference | `default`, `performance`, `balance_performance`, `balance_power`, `power` |
+| `cpu_platform_profile` | Platform profile associado ao EPP | `low-power`, `quiet`, `balanced`, `balanced-performance`, `performance` ou `""` (auto) |
 
 **Nota sobre EPP**: Com governor `performance`, o EPP é controlado automaticamente pelo driver e pode não aceitar mudanças manuais. Use governor `powersave` para controle total do EPP.
+
+**Nota sobre `cpu_platform_profile`**: Quando vazio (padrão), o sistema deduz o platform profile automaticamente a partir do EPP. Defina explicitamente apenas se precisar forçar um profile específico.
 
 ## Integração com Nekro-Sense
 
@@ -299,7 +304,7 @@ Módulo para leitura/escrita de controles CPU via sysfs:
 - EPP (`/sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference`)
 
 ### epp_override.py
-Daemon que monitora `/sys/firmware/acpi/platform_profile` e corrige o mapeamento EPP quando o botão físico do Predator é pressionado. Sobrescreve o comportamento padrão do `power-profiles-daemon` para garantir que o modo `balanced` use `balance_power` ao invés de `balance_performance`.
+Daemon que monitora `/sys/firmware/acpi/platform_profile` e sincroniza automaticamente governor, turbo boost e EPP quando o botão físico do Predator é pressionado. Garante que cada platform profile aplique os parâmetros corretos (ex: `balanced` usa `balance_power` ao invés de `balance_performance`, e desliga turbo nos profiles de economia).
 
 ### fan_monitor.py
 Módulo para leitura de fan speeds e temperaturas via hwmon (`/sys/class/hwmon`).
@@ -362,6 +367,7 @@ journalctl -u fan-aggressor -u epp-override -f
 ## Desinstalação
 
 ```bash
+# Serviços
 sudo systemctl stop fan-aggressor epp-override
 sudo systemctl disable fan-aggressor epp-override
 sudo rm /etc/systemd/system/fan-aggressor.service
@@ -371,6 +377,12 @@ sudo rm /usr/local/bin/epp_override
 sudo rm -rf /usr/local/lib/fan-aggressor
 sudo rm -rf /etc/fan-aggressor
 sudo systemctl daemon-reload
+
+# GUI (se instalada)
+sudo rm -f /usr/share/icons/hicolor/scalable/apps/fan-aggressor.svg
+sudo gtk-update-icon-cache /usr/share/icons/hicolor/ 2>/dev/null || true
+rm -f ~/.local/share/applications/fan-aggressor.desktop
+update-desktop-database ~/.local/share/applications/ 2>/dev/null || true
 ```
 
 ## Troubleshooting
