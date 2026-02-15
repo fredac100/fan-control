@@ -107,8 +107,12 @@ def get_state() -> Optional[Dict[str, Any]]:
         return None
     try:
         with open(STATE_FILE) as f:
-            return json.load(f)
-    except (json.JSONDecodeError, PermissionError):
+            state = json.load(f)
+        required_keys = {"active", "cpu_offset", "gpu_offset", "base_cpu", "base_gpu"}
+        if not all(k in state for k in required_keys):
+            return None
+        return state
+    except (json.JSONDecodeError, PermissionError, TypeError):
         return None
 
 
@@ -128,7 +132,7 @@ def get_service_status() -> str:
     try:
         result = subprocess.run(
             ["systemctl", "is-active", "fan-aggressor.service"],
-            capture_output=True, text=True
+            capture_output=True, text=True, timeout=3
         )
         return result.stdout.strip()
     except Exception:
@@ -614,7 +618,7 @@ class FanAggressorApp(Adw.Application):
                 dialog = Adw.MessageDialog(
                     transient_for=self.props.active_window,
                     heading="Error",
-                    body="Failed to save configuration"
+                    body="Failed to save configuration. Check PolicyKit authentication or file permissions."
                 )
                 dialog.add_response("ok", "OK")
                 dialog.present()
@@ -623,15 +627,17 @@ class FanAggressorApp(Adw.Application):
 
     def _on_restart_clicked(self, button):
         button.set_sensitive(False)
+        button.set_label("Restarting...")
 
         def on_done(success, msg):
             button.set_sensitive(True)
+            button.set_label("Restart")
             self._refresh_all()
             if not success:
                 dialog = Adw.MessageDialog(
                     transient_for=self.props.active_window,
-                    heading="Error",
-                    body=msg
+                    heading="Restart Failed",
+                    body=f"Could not restart service: {msg}"
                 )
                 dialog.add_response("ok", "OK")
                 dialog.present()
@@ -639,7 +645,13 @@ class FanAggressorApp(Adw.Application):
         restart_service(on_done)
 
     def _refresh_all(self):
-        status = get_service_status()
+        status = self._cached_service_status if hasattr(self, '_cached_service_status') else "unknown"
+
+        def _fetch_status():
+            result = get_service_status()
+            GLib.idle_add(self._update_service_status_label, result)
+
+        threading.Thread(target=_fetch_status, daemon=True).start()
 
         if status == "active":
             self.status_label.set_text("Running")
@@ -735,8 +747,20 @@ class FanAggressorApp(Adw.Application):
 
         self._update_profile_indicator()
 
+    def _update_service_status_label(self, status: str):
+        self._cached_service_status = status
+        if status == "active":
+            self.status_label.set_text("Running")
+            self.status_label.remove_css_class("error")
+            self.status_label.add_css_class("success")
+        else:
+            self.status_label.set_text("Stopped")
+            self.status_label.add_css_class("error")
+            self.status_label.remove_css_class("success")
+
     def _auto_refresh(self) -> bool:
-        self._refresh_all()
+        if self.props.active_window:
+            self._refresh_all()
         return True
 
     def _on_close(self, window):

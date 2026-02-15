@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+set -euo pipefail
 
 if [ "$EUID" -ne 0 ]; then
     echo "Por favor, execute como root (sudo ./install.sh)"
@@ -46,6 +46,14 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ReadWritePaths=/etc/fan-aggressor /var/run
+ProtectHome=no
+ProtectControlGroups=true
+ProtectClock=true
+ProtectKernelLogs=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
 
 [Install]
 WantedBy=multi-user.target
@@ -63,6 +71,15 @@ Restart=on-failure
 RestartSec=3
 StandardOutput=journal
 StandardError=journal
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectKernelLogs=true
+RestrictRealtime=true
+LockPersonality=true
 
 [Install]
 WantedBy=multi-user.target

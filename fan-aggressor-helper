@@ -11,14 +11,23 @@ CONFIG_FILE = Path("/etc/fan-aggressor/config.json")
 
 ALLOWED_ACTIONS = {"save-config", "restart-service", "apply-cpu-power"}
 
+ALLOWED_CONFIG_KEYS = {
+    "cpu_fan_offset", "gpu_fan_offset", "enabled", "poll_interval",
+    "hybrid_mode", "temp_threshold_engage", "temp_threshold_disengage",
+    "cpu_governor", "cpu_turbo_enabled", "cpu_epp", "cpu_platform_profile",
+    "link_offsets", "nekroctl_path", "failsafe_mode"
+}
+
 
 def save_config():
     content = sys.stdin.read()
     config = json.loads(content)
+    sanitized = {k: v for k, v in config.items() if k in ALLOWED_CONFIG_KEYS}
     CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = CONFIG_FILE.with_suffix(".tmp")
-    with open(tmp_path, "w") as f:
-        json.dump(config, f, indent=2)
+    fd = os.open(str(tmp_path), os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o644)
+    with os.fdopen(fd, "w") as f:
+        json.dump(sanitized, f, indent=2)
     os.replace(tmp_path, CONFIG_FILE)
 
 

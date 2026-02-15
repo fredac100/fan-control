@@ -4,6 +4,7 @@ import os
 import sys
 import time
 import json
+import fcntl
 import argparse
 import signal
 import subprocess
@@ -24,6 +25,12 @@ CONFIG_FILE = Path("/etc/fan-aggressor/config.json")
 PID_FILE = "/var/run/fan-aggressor.pid"
 STATE_FILE = Path("/var/run/fan-aggressor.state")
 
+ALLOWED_NEKROCTL_DIRS = [
+    "/usr/local/bin",
+    "/usr/bin",
+    "/opt/nekro-sense/tools",
+]
+
 DEFAULT_NEKROCTL_CANDIDATES = [
     "/usr/local/bin/nekroctl.py",
     "/usr/local/bin/nekroctl",
@@ -31,28 +38,50 @@ DEFAULT_NEKROCTL_CANDIDATES = [
     "/opt/nekro-sense/tools/nekroctl.py",
 ]
 
+SUBPROCESS_TIMEOUT = 5
+MAX_FAN_FAILURES = 3
+MIN_SANE_TEMP = 5
+MAX_SANE_TEMP = 115
+
+
+def _is_nekroctl_path_allowed(path: str) -> bool:
+    try:
+        resolved = Path(path).resolve()
+        return any(
+            resolved.parent == Path(d).resolve()
+            for d in ALLOWED_NEKROCTL_DIRS
+        )
+    except (ValueError, OSError):
+        return False
+
+
+def _find_nekroctl_in_home() -> Optional[str]:
+    import glob
+    import re
+    for match in glob.glob("/home/*/nekro-sense/tools/nekroctl.py"):
+        resolved = str(Path(match).resolve())
+        if re.match(r"^/home/[a-zA-Z0-9_.-]+/nekro-sense/tools/nekroctl\.py$", resolved):
+            if os.access(resolved, os.X_OK):
+                return resolved
+    return None
+
 
 def _find_nekroctl(config: Dict) -> Optional[str]:
     explicit = config.get("nekroctl_path")
     if explicit:
-        if os.path.exists(explicit) and os.access(explicit, os.X_OK):
+        if _is_nekroctl_path_allowed(explicit) and os.path.exists(explicit) and os.access(explicit, os.X_OK):
             return explicit
         return None
 
     env_path = os.getenv("NEKROCTL")
-    if env_path and os.path.exists(env_path) and os.access(env_path, os.X_OK):
+    if env_path and _is_nekroctl_path_allowed(env_path) and os.path.exists(env_path) and os.access(env_path, os.X_OK):
         return env_path
 
     for candidate in DEFAULT_NEKROCTL_CANDIDATES:
         if os.path.exists(candidate) and os.access(candidate, os.X_OK):
             return candidate
 
-    import glob
-    for match in glob.glob("/home/*/nekro-sense/tools/nekroctl.py"):
-        if os.access(match, os.X_OK):
-            return match
-
-    return None
+    return _find_nekroctl_in_home()
 
 
 def set_fan_speed(nekroctl: str, cpu: int, gpu: int) -> bool:
@@ -60,17 +89,18 @@ def set_fan_speed(nekroctl: str, cpu: int, gpu: int) -> bool:
     gpu = max(0, min(100, gpu))
     try:
         subprocess.run([nekroctl, "fan", "set", str(cpu), str(gpu)],
-                      check=True, capture_output=True)
+                      check=True, capture_output=True, timeout=SUBPROCESS_TIMEOUT)
         return True
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
         return False
 
 
 def set_fan_auto(nekroctl: str) -> bool:
     try:
-        subprocess.run([nekroctl, "fan", "auto"], check=True, capture_output=True)
+        subprocess.run([nekroctl, "fan", "auto"], check=True, capture_output=True,
+                      timeout=SUBPROCESS_TIMEOUT)
         return True
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
         return False
 
 
@@ -83,9 +113,10 @@ def write_state(active: bool, cpu_offset: int = 0, gpu_offset: int = 0, base_cpu
             "base_cpu": base_cpu,
             "base_gpu": base_gpu
         }
-        with open(STATE_FILE, 'w') as f:
+        fd = os.open(str(STATE_FILE), os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o644)
+        with os.fdopen(fd, 'w') as f:
             json.dump(state, f)
-    except PermissionError:
+    except (PermissionError, OSError):
         pass
 
 
@@ -100,11 +131,12 @@ def clear_state():
 def get_fan_speed(nekroctl: str) -> tuple:
     try:
         result = subprocess.run([nekroctl, "fan", "get"],
-                               capture_output=True, text=True, check=True)
+                               capture_output=True, text=True, check=True,
+                               timeout=SUBPROCESS_TIMEOUT)
         parts = result.stdout.strip().split(",")
         if len(parts) == 2:
             return int(parts[0]), int(parts[1])
-    except (subprocess.CalledProcessError, ValueError, IndexError, OSError):
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError, IndexError, OSError):
         pass
     return None, None
 
@@ -169,9 +201,16 @@ class FanAggressor:
                 return self._sanitize_config(default)
         return self._sanitize_config(default)
 
+    @staticmethod
+    def _safe_int(value, default: int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
     def _sanitize_config(self, config: Dict) -> Dict:
-        config["cpu_fan_offset"] = int(config.get("cpu_fan_offset", 0))
-        config["gpu_fan_offset"] = int(config.get("gpu_fan_offset", 0))
+        config["cpu_fan_offset"] = self._safe_int(config.get("cpu_fan_offset"), 0)
+        config["gpu_fan_offset"] = self._safe_int(config.get("gpu_fan_offset"), 0)
         config["cpu_fan_offset"] = max(-100, min(100, config["cpu_fan_offset"]))
         config["gpu_fan_offset"] = max(-100, min(100, config["gpu_fan_offset"]))
 
@@ -202,6 +241,8 @@ class FanAggressor:
         config["failsafe_mode"] = failsafe
 
         nekroctl_path = config.get("nekroctl_path")
+        if nekroctl_path and not _is_nekroctl_path_allowed(nekroctl_path):
+            nekroctl_path = None
         config["nekroctl_path"] = nekroctl_path if nekroctl_path else None
         return config
 
@@ -304,13 +345,38 @@ class FanAggressor:
             self.config.get("cpu_platform_profile", "")
         )
 
+    def _acquire_pid_lock(self):
+        self._pid_fd = os.open(PID_FILE, os.O_CREAT | os.O_RDWR, 0o644)
+        try:
+            fcntl.flock(self._pid_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(self._pid_fd)
+            self._pid_fd = None
+            print("Erro: daemon já está rodando")
+            sys.exit(1)
+        os.ftruncate(self._pid_fd, 0)
+        os.write(self._pid_fd, str(os.getpid()).encode())
+        os.fsync(self._pid_fd)
+
+    def _release_pid_lock(self):
+        if hasattr(self, '_pid_fd') and self._pid_fd is not None:
+            try:
+                fcntl.flock(self._pid_fd, fcntl.LOCK_UN)
+                os.close(self._pid_fd)
+            except OSError:
+                pass
+        if os.path.exists(PID_FILE):
+            try:
+                os.remove(PID_FILE)
+            except OSError:
+                pass
+
     def daemon(self):
         self.running = True
         self.is_boosting = False
 
         try:
-            with open(PID_FILE, 'w') as f:
-                f.write(str(os.getpid()))
+            self._acquire_pid_lock()
         except PermissionError:
             pass
 
@@ -339,7 +405,10 @@ class FanAggressor:
 
         try:
             while self.running:
-                self.config = self._load_config()
+                try:
+                    self.config = self._load_config()
+                except Exception:
+                    pass
                 self.nekroctl_path = _find_nekroctl(self.config)
                 hybrid = self.config.get('hybrid_mode', True)
 
@@ -359,6 +428,7 @@ class FanAggressor:
                         self.last_cpu = -1
                         self.last_gpu = -1
                         self.is_boosting = False
+                        self.fan_failures = 0
                     time.sleep(1)
                     continue
 
@@ -371,7 +441,7 @@ class FanAggressor:
                 self.nekroctl_missing_logged = False
 
                 temp = self.monitor.get_max_temp()
-                if temp is None or temp < 0 or temp > 120:
+                if temp is None or temp < MIN_SANE_TEMP or temp > MAX_SANE_TEMP:
                     if self.config.get("failsafe_mode") == "max":
                         if set_fan_speed(self.nekroctl_path, 100, 100):
                             write_state(True, 0, 0, 100, 100)
@@ -442,7 +512,7 @@ class FanAggressor:
                             self.fan_failures += 1
                             print("Falha ao setar fans (curva fixa)")
 
-                if self.fan_failures >= 3:
+                if self.fan_failures >= MAX_FAN_FAILURES:
                     print("Múltiplas falhas ao controlar fans; retornando ao AUTO")
                     set_fan_auto(self.nekroctl_path)
                     clear_state()
@@ -459,8 +529,7 @@ class FanAggressor:
             if self.nekroctl_path:
                 set_fan_auto(self.nekroctl_path)
             clear_state()
-            if os.path.exists(PID_FILE):
-                os.remove(PID_FILE)
+            self._release_pid_lock()
             print("\nDaemon finalizado - modo auto restaurado")
 
     def _signal_handler(self, signum, frame):
