@@ -223,7 +223,7 @@ class FanAggressorApp(Adw.Application):
     def do_activate(self):
         win = self.props.active_window
         if not win:
-            threading.Thread(target=acquire_sudo, daemon=True).start()
+            acquire_sudo()
             self.sudo_refresh_timeout_id = GLib.timeout_add_seconds(
                 300, self._refresh_sudo_timestamp
             )

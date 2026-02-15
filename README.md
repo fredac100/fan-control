@@ -25,14 +25,14 @@ Isso instala e configura:
 - **nekro-sense** - Módulo kernel para comunicação com o hardware
 - **fan_aggressor** - CLI e daemon de controle de fans
 - **epp_override** - Correção de EPP do botão Predator
-- **Interface gráfica** - GTK4/Libadwaita no menu de aplicações
+- **Interface gráfica** - GTK4/Libadwaita com ícone na bandeja de aplicativos
 - **Serviços systemd** - Tudo habilitado e rodando automaticamente
 
 ## Após Instalar
 
 ### Interface Gráfica (recomendado)
 
-Procure **"Fan Aggressor"** no menu de aplicações ou execute:
+Procure **"Fan Aggressor"** na bandeja de aplicativos ou execute:
 
 ```bash
 ./fan_aggressor_gui.py
@@ -178,7 +178,7 @@ sudo ./install.sh
 sudo apt install libgtk-4-1 libadwaita-1-0 python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1
 ```
 
-> O `install.sh` já habilita e inicia os serviços automaticamente, instala o ícone e adiciona o atalho no menu de aplicações.
+> O `install.sh` já habilita e inicia os serviços automaticamente, instala o ícone na bandeja de aplicativos e configura tudo.
 
 ## Troubleshooting
 
