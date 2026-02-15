@@ -75,23 +75,15 @@ else
     echo "   Módulo ec_sys não disponível (usando backend alternativo)"
 fi
 
-REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo fred)}"
-echo "4. Configurando permissões de config para $REAL_USER..."
-mkdir -p /etc/fan-aggressor
-if [ -f /etc/fan-aggressor/config.json ]; then
-    chown "$REAL_USER":"$REAL_USER" /etc/fan-aggressor/config.json
-fi
-chown "$REAL_USER":"$REAL_USER" /etc/fan-aggressor
-
 echo ""
 echo "=== Instalação concluída! ==="
 echo ""
 echo "Comandos:"
-echo "  fan_aggressor status          - Ver status atual"
+echo "  fan_aggressor status          - Ver status e backends disponíveis"
 echo "  fan_aggressor set cpu +10     - Aumentar agressividade CPU"
 echo "  fan_aggressor set gpu +10     - Aumentar agressividade GPU"
 echo "  fan_aggressor set both +10    - Aumentar ambos"
-echo "  fan_aggressor daemon          - Iniciar daemon (requer root)"
+echo "  fan_aggressor backend auto    - Selecionar backend (auto|ec|nekro|predator)"
 echo "  fan_aggressor enable          - Ativar controle"
 echo "  fan_aggressor disable         - Desativar controle"
 echo ""
