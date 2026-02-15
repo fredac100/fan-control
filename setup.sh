@@ -152,9 +152,12 @@ install_fan_aggressor() {
     mkdir -p /usr/local/lib/fan-aggressor
     cp fan_monitor.py /usr/local/lib/fan-aggressor/
     cp cpu_power.py /usr/local/lib/fan-aggressor/
+    cp fan-aggressor-helper /usr/local/lib/fan-aggressor/fan-aggressor-helper
+    chmod +x /usr/local/lib/fan-aggressor/fan-aggressor-helper
     chmod 644 /usr/local/lib/fan-aggressor/*.py
     chmod 755 /usr/local/lib/fan-aggressor
     rm -rf /usr/local/lib/fan-aggressor/__pycache__
+    cp com.fancontrol.aggressor.policy /usr/share/polkit-1/actions/
     cp epp_override.py /usr/local/bin/epp_override
     chmod +x /usr/local/bin/epp_override
 

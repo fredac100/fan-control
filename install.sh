@@ -16,6 +16,9 @@ chmod +x /usr/local/bin/fan_aggressor
 mkdir -p /usr/local/lib/fan-aggressor
 cp fan_monitor.py /usr/local/lib/fan-aggressor/
 cp cpu_power.py /usr/local/lib/fan-aggressor/
+cp fan-aggressor-helper /usr/local/lib/fan-aggressor/fan-aggressor-helper
+chmod +x /usr/local/lib/fan-aggressor/fan-aggressor-helper
+cp com.fancontrol.aggressor.policy /usr/share/polkit-1/actions/
 cp epp_override.py /usr/local/bin/epp_override
 chmod +x /usr/local/bin/epp_override
 

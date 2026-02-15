@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import sys
+import os
+import json
+from pathlib import Path
+
+CONFIG_FILE = Path("/etc/fan-aggressor/config.json")
+
+ALLOWED_ACTIONS = {"save-config", "restart-service", "apply-cpu-power"}
+
+
+def save_config():
+    content = sys.stdin.read()
+    config = json.loads(content)
+    CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = CONFIG_FILE.with_suffix(".tmp")
+    with open(tmp_path, "w") as f:
+        json.dump(config, f, indent=2)
+    os.replace(tmp_path, CONFIG_FILE)
+
+
+def restart_service():
+    import subprocess
+    proc = subprocess.run(
+        ["systemctl", "restart", "fan-aggressor.service"],
+        capture_output=True, text=True
+    )
+    if proc.returncode != 0:
+        sys.stderr.write(proc.stderr or "Failed to restart service")
+        sys.exit(1)
+
+
+def apply_cpu_power():
+    for p in [str(Path(__file__).parent), "/usr/local/lib/fan-aggressor"]:
+        if p not in sys.path:
+            sys.path.insert(0, p)
+
+    from cpu_power import set_governor, set_turbo, set_epp
+
+    params = json.loads(sys.stdin.read())
+    gov = params.get("governor")
+    turbo = params.get("turbo", True)
+    epp = params.get("epp")
+    pp = params.get("platform_profile")
+
+    if gov:
+        set_governor(gov)
+    set_turbo(turbo)
+    if epp:
+        set_epp(epp, platform_profile=pp)
+
+
+def main():
+    if os.getuid() != 0:
+        sys.stderr.write("This helper must be run as root (via pkexec)\n")
+        sys.exit(1)
+
+    if len(sys.argv) < 2 or sys.argv[1] not in ALLOWED_ACTIONS:
+        sys.stderr.write(f"Usage: {sys.argv[0]} <{'|'.join(sorted(ALLOWED_ACTIONS))}>\n")
+        sys.exit(1)
+
+    action = sys.argv[1]
+
+    if action == "save-config":
+        save_config()
+    elif action == "restart-service":
+        restart_service()
+    elif action == "apply-cpu-power":
+        apply_cpu_power()
+
+
+if __name__ == "__main__":
+    main()

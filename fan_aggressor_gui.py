@@ -37,28 +37,17 @@ from cpu_power import (
 CONFIG_FILE = Path("/etc/fan-aggressor/config.json")
 STATE_FILE = Path("/var/run/fan-aggressor.state")
 PID_FILE = Path("/var/run/fan-aggressor.pid")
+HELPER = "/usr/local/lib/fan-aggressor/fan-aggressor-helper"
 
 
-def acquire_sudo() -> bool:
-    try:
-        proc = subprocess.run(
-            ["pkexec", "sudo", "-v"],
-            capture_output=True, timeout=60
-        )
-        return proc.returncode == 0
-    except Exception:
-        return False
-
-
-def refresh_sudo() -> bool:
-    try:
-        proc = subprocess.run(
-            ["sudo", "-vn"],
-            capture_output=True, timeout=5
-        )
-        return proc.returncode == 0
-    except Exception:
-        return False
+def run_helper(action: str, stdin_data: str = None, timeout: int = 15) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["pkexec", HELPER, action],
+        input=stdin_data,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
 
 
 def load_config() -> Dict[str, Any]:
@@ -104,43 +93,9 @@ def save_config(config: Dict[str, Any]) -> bool:
 
 def save_config_privileged(config: Dict[str, Any], callback: Callable[[bool], None]):
     def _worker():
-        content = json.dumps(config, indent=2)
-        tmp_path = str(CONFIG_FILE.with_suffix(".tmp"))
         try:
-            proc = subprocess.run(
-                ["sudo", "-n", "tee", tmp_path],
-                input=content,
-                capture_output=True,
-                text=True
-            )
-            if proc.returncode == 0:
-                proc = subprocess.run(
-                    ["sudo", "-n", "mv", tmp_path, str(CONFIG_FILE)],
-                    capture_output=True,
-                    text=True
-                )
-                if proc.returncode == 0:
-                    GLib.idle_add(callback, True)
-                    return
-        except Exception:
-            pass
-
-        try:
-            proc = subprocess.run(
-                ["pkexec", "tee", tmp_path],
-                input=content,
-                capture_output=True,
-                text=True
-            )
-            if proc.returncode == 0:
-                proc = subprocess.run(
-                    ["pkexec", "mv", tmp_path, str(CONFIG_FILE)],
-                    capture_output=True,
-                    text=True
-                )
-                GLib.idle_add(callback, proc.returncode == 0)
-            else:
-                GLib.idle_add(callback, False)
+            proc = run_helper("save-config", json.dumps(config, indent=2))
+            GLib.idle_add(callback, proc.returncode == 0)
         except Exception:
             GLib.idle_add(callback, False)
 
@@ -183,21 +138,7 @@ def get_service_status() -> str:
 def restart_service(callback: Callable[[bool, str], None]):
     def _worker():
         try:
-            proc = subprocess.run(
-                ["sudo", "-n", "systemctl", "restart", "fan-aggressor.service"],
-                capture_output=True, text=True
-            )
-            if proc.returncode == 0:
-                GLib.idle_add(callback, True, "Service restarted")
-                return
-        except Exception:
-            pass
-
-        try:
-            proc = subprocess.run(
-                ["pkexec", "systemctl", "restart", "fan-aggressor.service"],
-                capture_output=True, text=True
-            )
+            proc = run_helper("restart-service")
             if proc.returncode == 0:
                 GLib.idle_add(callback, True, "Service restarted")
             else:
@@ -218,15 +159,10 @@ class FanAggressorApp(Adw.Application):
         self.config = load_config()
         self.updating = False
         self.refresh_timeout_id = None
-        self.sudo_refresh_timeout_id = None
 
     def do_activate(self):
         win = self.props.active_window
         if not win:
-            acquire_sudo()
-            self.sudo_refresh_timeout_id = GLib.timeout_add_seconds(
-                300, self._refresh_sudo_timestamp
-            )
             win = self._build_window()
         win.present()
 
@@ -598,31 +534,19 @@ class FanAggressorApp(Adw.Application):
         turbo = self.config.get("cpu_turbo_enabled", True)
         epp = self.config.get("cpu_epp")
         pp = self.config.get("cpu_platform_profile") or None
-        pp_arg = f", platform_profile='{pp}'" if pp else ""
 
         if set_governor(gov) and set_turbo(turbo) and set_epp(epp, platform_profile=pp):
             return
 
         def _worker():
-            script = (
-                f"import sys; sys.path.insert(0, '{Path(__file__).parent}'); "
-                f"sys.path.insert(0, '/usr/local/lib/fan-aggressor'); "
-                f"from cpu_power import set_governor, set_turbo, set_epp; "
-                f"set_governor('{gov}'); set_turbo({turbo}); set_epp('{epp}'{pp_arg})"
-            )
+            params = json.dumps({
+                "governor": gov,
+                "turbo": turbo,
+                "epp": epp,
+                "platform_profile": pp,
+            })
             try:
-                subprocess.run(
-                    ["sudo", "-n", "python3", "-c", script],
-                    capture_output=True, timeout=5
-                )
-                return
-            except Exception:
-                pass
-            try:
-                subprocess.run(
-                    ["pkexec", "python3", "-c", script],
-                    capture_output=True, timeout=10
-                )
+                run_helper("apply-cpu-power", params)
             except Exception:
                 pass
 
@@ -815,17 +739,10 @@ class FanAggressorApp(Adw.Application):
         self._refresh_all()
         return True
 
-    def _refresh_sudo_timestamp(self) -> bool:
-        threading.Thread(target=refresh_sudo, daemon=True).start()
-        return True
-
     def _on_close(self, window):
         if self.refresh_timeout_id:
             GLib.source_remove(self.refresh_timeout_id)
             self.refresh_timeout_id = None
-        if self.sudo_refresh_timeout_id:
-            GLib.source_remove(self.sudo_refresh_timeout_id)
-            self.sudo_refresh_timeout_id = None
         return False
 
 
