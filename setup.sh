@@ -91,9 +91,9 @@ install_nekro_sense() {
         return 0
     fi
 
-    local nekro_dir="/home/fred/nekro-sense"
-
     local real_user="${SUDO_USER:-$USER}"
+    local real_home=$(eval echo "~$real_user")
+    local nekro_dir="$real_home/nekro-sense"
 
     if [ -d "$nekro_dir" ]; then
         log_info "Repositório encontrado em $nekro_dir, atualizando..."
@@ -129,8 +129,9 @@ install_nekro_sense() {
 install_fan_aggressor() {
     log_step "Instalando Fan Aggressor..."
 
-    local fan_dir="/home/fred/fan-control"
     local real_user="${SUDO_USER:-$USER}"
+    local real_home=$(eval echo "~$real_user")
+    local fan_dir="$real_home/fan-control"
 
     if [ -d "$fan_dir" ]; then
         log_info "Repositório encontrado em $fan_dir"

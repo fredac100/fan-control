@@ -25,7 +25,6 @@ PID_FILE = "/var/run/fan-aggressor.pid"
 STATE_FILE = Path("/var/run/fan-aggressor.state")
 
 DEFAULT_NEKROCTL_CANDIDATES = [
-    "/home/fred/nekro-sense/tools/nekroctl.py",
     "/usr/local/bin/nekroctl.py",
     "/usr/local/bin/nekroctl",
     "/usr/bin/nekroctl",
@@ -47,6 +46,12 @@ def _find_nekroctl(config: Dict) -> Optional[str]:
     for candidate in DEFAULT_NEKROCTL_CANDIDATES:
         if os.path.exists(candidate) and os.access(candidate, os.X_OK):
             return candidate
+
+    import glob
+    for match in glob.glob("/home/*/nekro-sense/tools/nekroctl.py"):
+        if os.access(match, os.X_OK):
+            return match
+
     return None
 
 
