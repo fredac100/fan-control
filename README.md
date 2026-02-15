@@ -1,52 +1,52 @@
 # Fan Aggressor
 
-Controle de ventiladores e gerenciamento de energia CPU para o **Acer Predator Helios Neo 16 (PHN16-72)** no Linux.
+Fan control and CPU power management for the **Acer Predator Helios Neo 16 (PHN16-72)** on Linux.
 
-> **Aviso**: Desenvolvido e testado exclusivamente no **Acer Predator PHN16-72**. Sem garantia para outros modelos.
+> **Warning**: Developed and tested exclusively on the **Acer Predator PHN16-72**. No guarantees for other models.
 
 ![Fan Aggressor GUI](docs/screenshot.png)
 
-## Instalação Rápida (uma linha)
+## Quick Install (one-liner)
 
-Instala tudo automaticamente: nekro-sense (módulo kernel), Fan Aggressor (CLI + daemon) e interface gráfica.
+Automatically installs everything: nekro-sense (kernel module), Fan Aggressor (CLI + daemon), and the graphical interface.
 
 ```bash
 git clone https://github.com/fredac100/fan-control.git && cd fan-control && sudo bash setup.sh
 ```
 
-Ou se já tem o repositório clonado:
+Or if you already have the repository cloned:
 
 ```bash
 cd fan-control
 sudo bash setup.sh
 ```
 
-Isso instala e configura:
-- **nekro-sense** - Módulo kernel para comunicação com o hardware
-- **fan_aggressor** - CLI e daemon de controle de fans
-- **epp_override** - Correção de EPP do botão Predator
-- **Interface gráfica** - GTK4/Libadwaita com ícone na bandeja de aplicativos
-- **Serviços systemd** - Tudo habilitado e rodando automaticamente
+This installs and configures:
+- **nekro-sense** — Kernel module for hardware communication
+- **fan_aggressor** — CLI and fan control daemon
+- **epp_override** — EPP correction for the Predator button
+- **Graphical interface** — GTK4/Libadwaita with application menu icon
+- **systemd services** — Everything enabled and running automatically
 
-## Após Instalar
+## After Installing
 
-### Interface Gráfica (recomendado)
+### Graphical Interface (recommended)
 
-Procure **"Fan Aggressor"** na bandeja de aplicativos ou execute:
+Search for **"Fan Aggressor"** in your application menu or run:
 
 ```bash
 fan-aggressor-gui
 ```
 
-### Linha de Comando
+### Command Line
 
 ```bash
-fan_aggressor status              # Ver status, temperaturas e velocidades
-fan_aggressor set both +15        # Ajustar offset dos fans (+15%)
-fan_aggressor set cpu +20         # CPU e GPU independentes
+fan_aggressor status              # Show status, temperatures and speeds
+fan_aggressor set both +15        # Adjust fan offset (+15%)
+fan_aggressor set cpu +20         # Set CPU and GPU independently
 fan_aggressor set gpu +10
-fan_aggressor enable              # Habilitar controle
-fan_aggressor disable             # Desabilitar (volta ao automático)
+fan_aggressor enable              # Enable fan control
+fan_aggressor disable             # Disable (returns to automatic)
 ```
 
 ### Logs
@@ -55,53 +55,53 @@ fan_aggressor disable             # Desabilitar (volta ao automático)
 journalctl -u fan-aggressor -f
 ```
 
-## Funcionalidades
+## Features
 
-### Interface Gráfica (GTK4/Libadwaita)
-- Layout em duas colunas: Fans (esquerda) + CPU Power (direita)
-- Status em tempo real: temperaturas, RPM, boost status
-- Sliders para offset, toggles para enable/hybrid mode
-- 5 Power Profiles com um clique
-- Autenticação única — pede senha apenas uma vez ao usar
+### Graphical Interface (GTK4/Libadwaita)
+- Two-column layout: Fans (left) + CPU Power (right)
+- Real-time status: temperatures, RPM, boost status
+- Sliders for offset, toggles for enable/hybrid mode
+- 5 Power Profiles with one click
+- Single authentication — prompts for password only once per session
 
-### Controle de Ventiladores
-- **Modo Híbrido** - Captura curva do fabricante, adiciona offset apenas quando necessário
-- **Offset configurável** - CPU e GPU independentes (-100% a +100%)
-- **Thresholds personalizáveis** - Controle de quando o boost ativa/desativa
-- **Daemon automático** - Monitora temperatura e ajusta fans continuamente
+### Fan Control
+- **Hybrid Mode** — Captures manufacturer's fan curve, adds offset only when needed
+- **Configurable offset** — CPU and GPU independent (-100% to +100%)
+- **Custom thresholds** — Control when boost activates/deactivates
+- **Automatic daemon** — Continuously monitors temperature and adjusts fans
 
-### Gerenciamento de Energia CPU
-- **Governor** - `powersave` ou `performance`
-- **Intel Turbo Boost** - ON/OFF
-- **EPP** - 5 níveis de eficiência energética
-- **EPP Override** - Corrige mapeamento do botão físico Predator
+### CPU Power Management
+- **Governor** — `powersave` or `performance`
+- **Intel Turbo Boost** — ON/OFF
+- **EPP** — 5 energy efficiency levels
+- **EPP Override** — Corrects physical Predator button mapping
 
 ### Power Profiles
 
-| Perfil | Governor | Turbo | EPP | Uso |
-|--------|----------|-------|-----|-----|
-| **Deep Sleep** | powersave | OFF | power | Economia extrema |
-| **Stealth Mode** | powersave | OFF | power | Silencioso |
-| **Cruise Control** | powersave | ON | balance_power | Uso diário |
-| **Boost Drive** | powersave | ON | balance_performance | Produtividade |
+| Profile | Governor | Turbo | EPP | Use Case |
+|---------|----------|-------|-----|----------|
+| **Deep Sleep** | powersave | OFF | power | Extreme battery saving |
+| **Stealth Mode** | powersave | OFF | power | Silent operation |
+| **Cruise Control** | powersave | ON | balance_power | Daily use |
+| **Boost Drive** | powersave | ON | balance_performance | Productivity |
 | **Nitro Overdrive** | performance | ON | performance | Gaming |
 
-## Como Funciona
+## How It Works
 
-![Como funciona](docs/how-it-works.png)
+![How it works](docs/how-it-works.png)
 
-### Modo Híbrido (Recomendado)
+### Hybrid Mode (Recommended)
 
-1. Sistema fica no **modo AUTO** enquanto temperatura está baixa (< threshold)
-2. Ao atingir o **threshold de engage** (padrão: 70°C), captura snapshot do RPM atual
-3. Aplica **curva do fabricante + offset** configurado
-4. Quando temperatura cai abaixo do **threshold de disengage** (padrão: 65°C), volta ao AUTO
+1. System stays in **AUTO mode** while temperature is low (< threshold)
+2. When the **engage threshold** is reached (default: 70°C), captures a snapshot of current RPM
+3. Applies **manufacturer's curve + configured offset**
+4. When temperature drops below the **disengage threshold** (default: 65°C), returns to AUTO
 
-O sistema **não substitui** a curva do fabricante — apenas **adiciona** o offset sobre ela.
+The system **does not replace** the manufacturer's fan curve — it only **adds** the offset on top of it.
 
-## Configuração
+## Configuration
 
-Arquivo: `/etc/fan-aggressor/config.json`
+File: `/etc/fan-aggressor/config.json`
 
 ```json
 {
@@ -118,44 +118,44 @@ Arquivo: `/etc/fan-aggressor/config.json`
 }
 ```
 
-O daemon recarrega o config automaticamente — não é necessário reiniciar o serviço.
+The daemon automatically reloads the config — no need to restart the service.
 
-### Parâmetros Principais
+### Main Parameters
 
-| Parâmetro | Descrição | Range/Valores |
-|-----------|-----------|---------------|
-| `cpu_fan_offset` | Offset CPU | -100 a +100 |
-| `gpu_fan_offset` | Offset GPU | -100 a +100 |
-| `enabled` | Ativar controle | true/false |
-| `hybrid_mode` | Usar thresholds | true/false |
-| `temp_threshold_engage` | Temperatura para ativar boost | °C (padrão: 70) |
-| `temp_threshold_disengage` | Temperatura para voltar ao auto | °C (padrão: 65) |
-| `cpu_governor` | Governor do CPU | powersave, performance |
+| Parameter | Description | Range/Values |
+|-----------|-------------|--------------|
+| `cpu_fan_offset` | CPU offset | -100 to +100 |
+| `gpu_fan_offset` | GPU offset | -100 to +100 |
+| `enabled` | Enable control | true/false |
+| `hybrid_mode` | Use thresholds | true/false |
+| `temp_threshold_engage` | Temperature to activate boost | °C (default: 70) |
+| `temp_threshold_disengage` | Temperature to return to auto | °C (default: 65) |
+| `cpu_governor` | CPU governor | powersave, performance |
 | `cpu_turbo_enabled` | Turbo Boost | true/false |
 | `cpu_epp` | Energy Performance Preference | power, balance_power, balance_performance, performance |
 
-## Cenários de Uso
+## Use Cases
 
-**Gaming** — perfil Nitro Overdrive + offset +20% a +30%:
+**Gaming** — Nitro Overdrive profile + offset +20% to +30%:
 ```bash
 fan_aggressor set both +25
 ```
 
-**Trabalho silencioso** — perfil Stealth Mode + offset 0%:
+**Silent work** — Stealth Mode profile + offset 0%:
 ```bash
 fan_aggressor set both 0
 ```
 
-**Uso diário** — perfil Cruise Control + offset +10% a +15%:
+**Daily use** — Cruise Control profile + offset +10% to +15%:
 ```bash
 fan_aggressor set both +10
 ```
 
-## Instalação Manual (passo a passo)
+## Manual Installation (step by step)
 
-Se preferir instalar manualmente ao invés do script automatizado:
+If you prefer to install manually instead of the automated script:
 
-### 1. nekro-sense (pré-requisito)
+### 1. nekro-sense (prerequisite)
 
 ```bash
 git clone https://github.com/fredac100/nekro-sense.git
@@ -173,39 +173,45 @@ cd fan-control
 sudo ./install.sh
 ```
 
-### 3. Dependências da GUI
+### 3. GUI Dependencies
 
 ```bash
 sudo apt install libgtk-4-1 libadwaita-1-0 python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1
 ```
 
-> O `install.sh` já habilita e inicia os serviços automaticamente, instala o ícone na bandeja de aplicativos e configura tudo.
+> `install.sh` already enables and starts all services, installs the application menu icon, and configures everything.
 
 ## Troubleshooting
 
-### Fans não respondem
+### Fans not responding
 ```bash
-lsmod | grep nekro                    # nekro-sense carregado?
-systemctl status fan-aggressor        # daemon rodando?
-journalctl -u fan-aggressor | grep nekroctl  # nekroctl encontrado?
+lsmod | grep nekro                    # Is nekro-sense loaded?
+systemctl status fan-aggressor        # Is the daemon running?
+journalctl -u fan-aggressor | grep nekroctl  # Is nekroctl found?
 ```
 
-### Fans escalam até 100%
-Atualize para a versão mais recente:
+### Fans ramp up to 100%
+Update to the latest version:
 ```bash
 cd fan-control && git pull
 sudo ./install.sh
 ```
 
-### EPP não muda
-Use governor `powersave` — com `performance`, o EPP é gerenciado pelo driver.
+### EPP not changing
+Use governor `powersave` — with `performance`, EPP is managed by the driver.
 
-### Sensores não funcionam
+### Sensors not working
 ```bash
-cat /sys/class/hwmon/hwmon*/name      # deve mostrar "acer" ou "coretemp"
+cat /sys/class/hwmon/hwmon*/name      # Should show "acer" or "coretemp"
 ```
 
-## Desinstalação
+## Uninstall
+
+```bash
+sudo ./uninstall.sh
+```
+
+Or manually:
 
 ```bash
 sudo systemctl stop fan-aggressor epp-override
@@ -218,7 +224,7 @@ rm ~/.local/share/applications/fan-aggressor.desktop
 sudo systemctl daemon-reload
 ```
 
-## Arquitetura
+## Architecture
 
 ```
 fan-aggressor-gui (GTK4) ──► fan-aggressor-helper (pkexec) ──┐
@@ -235,13 +241,13 @@ fan_aggressor (CLI) ──► fan_aggressor.py (daemon) ───► cpu_power.p
                               Hardware (WMI)
 ```
 
-## Requisitos
+## Requirements
 
 - **Notebook**: Acer Predator Helios Neo 16 (PHN16-72)
-- **OS**: Linux com kernel 5.x+ (testado em Ubuntu 24.04+)
-- **CPU**: Intel (para turbo boost e EPP via `intel_pstate`)
+- **OS**: Linux with kernel 5.x+ (tested on Ubuntu 24.04+)
+- **CPU**: Intel (for Turbo Boost and EPP via `intel_pstate`)
 - **Python**: 3.8+
 
-## Licença
+## License
 
 MIT
