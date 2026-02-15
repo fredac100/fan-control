@@ -11,7 +11,6 @@ NC='\033[0m'
 
 NEKRO_REPO="https://github.com/fredac100/nekro-sense.git"
 FAN_REPO="https://github.com/fredac100/fan-control.git"
-INSTALL_DIR="/tmp/fan-aggressor-install"
 
 print_banner() {
     echo -e "${BLUE}${BOLD}"
@@ -131,7 +130,6 @@ install_fan_aggressor() {
     log_step "Instalando Fan Aggressor..."
 
     local fan_dir="/home/fred/fan-control"
-
     local real_user="${SUDO_USER:-$USER}"
 
     if [ -d "$fan_dir" ]; then
@@ -145,119 +143,12 @@ install_fan_aggressor() {
         cd "$fan_dir"
     fi
 
-    log_info "Instalando executáveis..."
-    cp fan_aggressor.py /usr/local/bin/fan_aggressor
-    chmod +x /usr/local/bin/fan_aggressor
-    cp fan_aggressor_gui.py /usr/local/bin/fan-aggressor-gui
-    chmod +x /usr/local/bin/fan-aggressor-gui
+    log_info "Executando install.sh..."
+    bash "$fan_dir/install.sh"
 
-    mkdir -p /usr/local/lib/fan-aggressor
-    cp fan_monitor.py /usr/local/lib/fan-aggressor/
-    cp cpu_power.py /usr/local/lib/fan-aggressor/
-    cp fan-aggressor-helper /usr/local/lib/fan-aggressor/fan-aggressor-helper
-    chmod +x /usr/local/lib/fan-aggressor/fan-aggressor-helper
     chmod 644 /usr/local/lib/fan-aggressor/*.py
     chmod 755 /usr/local/lib/fan-aggressor
     rm -rf /usr/local/lib/fan-aggressor/__pycache__
-    cp com.fancontrol.aggressor.policy /usr/share/polkit-1/actions/
-    cp epp_override.py /usr/local/bin/epp_override
-    chmod +x /usr/local/bin/epp_override
-
-    log_info "Configurando serviços systemd..."
-
-    cat > /etc/systemd/system/fan-aggressor.service << 'SVCEOF'
-[Unit]
-Description=Fan Aggressor - Controle de agressividade dos ventiladores
-After=multi-user.target
-
-[Service]
-Type=simple
-ExecStartPre=-/sbin/modprobe ec_sys write_support=1
-Environment=PYTHONPATH=/usr/local/lib/fan-aggressor
-Environment=PYTHONUNBUFFERED=1
-ExecStart=/usr/local/bin/fan_aggressor daemon
-Restart=on-failure
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=full
-ReadWritePaths=/etc/fan-aggressor /var/run
-
-[Install]
-WantedBy=multi-user.target
-SVCEOF
-
-    cat > /etc/systemd/system/epp-override.service << 'SVCEOF'
-[Unit]
-Description=EPP Override - Corrige mapeamento platform_profile → EPP
-After=power-profiles-daemon.service
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/epp_override
-Restart=on-failure
-RestartSec=3
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-SVCEOF
-
-    systemctl daemon-reload
-
-    if modprobe ec_sys write_support=1 2>/dev/null; then
-        if ! grep -q "ec_sys" /etc/modules 2>/dev/null; then
-            echo "ec_sys" >> /etc/modules
-        fi
-        if [ ! -f /etc/modprobe.d/ec_sys.conf ]; then
-            echo "options ec_sys write_support=1" > /etc/modprobe.d/ec_sys.conf
-        fi
-    fi
-
-    log_info "CLI instalada em /usr/local/bin/fan_aggressor"
-}
-
-install_gui() {
-    log_step "Instalando interface gráfica..."
-
-    local fan_dir="/home/fred/fan-control"
-    cd "$fan_dir"
-
-    chmod +x fan_aggressor_gui.py
-
-    mkdir -p /usr/share/icons/hicolor/scalable/apps
-    cp fan-aggressor.svg /usr/share/icons/hicolor/scalable/apps/
-    chmod 644 /usr/share/icons/hicolor/scalable/apps/fan-aggressor.svg
-    gtk-update-icon-cache -f /usr/share/icons/hicolor/ 2>/dev/null || true
-
-    local real_user="${SUDO_USER:-$USER}"
-    local real_home=$(eval echo "~$real_user")
-    local desktop_dir="$real_home/.local/share/applications"
-
-    mkdir -p "$desktop_dir"
-    cp fan-aggressor.desktop "$desktop_dir/"
-    chown "$real_user":"$real_user" "$desktop_dir/fan-aggressor.desktop"
-    update-desktop-database "$desktop_dir" 2>/dev/null || true
-
-    log_info "GUI disponível no menu de aplicações"
-    log_info "Ou execute: $fan_dir/fan_aggressor_gui.py"
-}
-
-enable_services() {
-    log_step "Habilitando e iniciando serviços..."
-
-    fan_aggressor enable 2>/dev/null || true
-
-    systemctl enable --now fan-aggressor 2>/dev/null && \
-        log_info "fan-aggressor: ativo e habilitado no boot" || \
-        log_warn "fan-aggressor: habilitado, mas pode precisar de reinício"
-
-    systemctl enable --now epp-override 2>/dev/null && \
-        log_info "epp-override: ativo e habilitado no boot" || \
-        log_warn "epp-override: habilitado, mas pode precisar de reinício"
 }
 
 print_summary() {
@@ -268,7 +159,7 @@ print_summary() {
     echo ""
     echo -e "${BOLD}Interface Gráfica:${NC}"
     echo -e "  Procure ${BLUE}Fan Aggressor${NC} no menu de aplicações"
-    echo -e "  Ou execute: ${BLUE}./fan_aggressor_gui.py${NC}"
+    echo -e "  Ou execute: ${BLUE}fan-aggressor-gui${NC}"
     echo ""
     echo -e "${BOLD}Linha de Comando:${NC}"
     echo -e "  ${BLUE}fan_aggressor status${NC}        - Ver status"
@@ -287,6 +178,4 @@ check_dependencies
 install_gui_deps
 install_nekro_sense
 install_fan_aggressor
-install_gui
-enable_services
 print_summary
