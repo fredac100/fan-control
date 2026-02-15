@@ -35,7 +35,7 @@ Isso instala e configura:
 Procure **"Fan Aggressor"** na bandeja de aplicativos ou execute:
 
 ```bash
-./fan_aggressor_gui.py
+fan-aggressor-gui
 ```
 
 ### Linha de Comando
@@ -62,6 +62,7 @@ journalctl -u fan-aggressor -f
 - Status em tempo real: temperaturas, RPM, boost status
 - Sliders para offset, toggles para enable/hybrid mode
 - 5 Power Profiles com um clique
+- Autenticação única — pede senha apenas uma vez ao usar
 
 ### Controle de Ventiladores
 - **Modo Híbrido** - Captura curva do fabricante, adiciona offset apenas quando necessário
@@ -192,9 +193,8 @@ journalctl -u fan-aggressor | grep nekroctl  # nekroctl encontrado?
 ### Fans escalam até 100%
 Atualize para a versão mais recente:
 ```bash
-cd /home/fred/fan-control && git pull
+cd fan-control && git pull
 sudo ./install.sh
-sudo systemctl restart fan-aggressor
 ```
 
 ### EPP não muda
@@ -211,19 +211,22 @@ cat /sys/class/hwmon/hwmon*/name      # deve mostrar "acer" ou "coretemp"
 sudo systemctl stop fan-aggressor epp-override
 sudo systemctl disable fan-aggressor epp-override
 sudo rm /etc/systemd/system/fan-aggressor.service /etc/systemd/system/epp-override.service
-sudo rm /usr/local/bin/fan_aggressor /usr/local/bin/epp_override
+sudo rm /usr/local/bin/fan_aggressor /usr/local/bin/fan-aggressor-gui /usr/local/bin/epp_override
 sudo rm -rf /usr/local/lib/fan-aggressor /etc/fan-aggressor
+sudo rm /usr/share/polkit-1/actions/com.fancontrol.aggressor.policy
+rm ~/.local/share/applications/fan-aggressor.desktop
 sudo systemctl daemon-reload
 ```
 
 ## Arquitetura
 
 ```
-fan_aggressor_gui.py  ──┐
-                        ├──► fan_aggressor.py (daemon) ───► cpu_power.py
-fan_aggressor (CLI)   ──┘           │                           │
-                                    ▼                           ▼
-                            nekroctl.py                  sysfs (cpufreq)
+fan-aggressor-gui (GTK4) ──► fan-aggressor-helper (pkexec) ──┐
+                                                              │
+fan_aggressor (CLI) ──► fan_aggressor.py (daemon) ───► cpu_power.py
+                                    │                         │
+                                    ▼                         ▼
+                            nekroctl.py                sysfs (cpufreq)
                                     │
                                     ▼
                           nekro-sense (kernel module)
