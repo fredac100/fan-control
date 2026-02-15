@@ -76,22 +76,47 @@ else
     echo "   Módulo ec_sys não disponível (usando backend alternativo)"
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+echo "4. Instalando ícone e atalho no menu..."
+if [ -f "$SCRIPT_DIR/fan-aggressor.svg" ]; then
+    mkdir -p /usr/share/icons/hicolor/scalable/apps
+    cp "$SCRIPT_DIR/fan-aggressor.svg" /usr/share/icons/hicolor/scalable/apps/
+    gtk-update-icon-cache -f /usr/share/icons/hicolor/ 2>/dev/null || true
+fi
+
+if [ -f "$SCRIPT_DIR/fan-aggressor.desktop" ]; then
+    REAL_USER="${SUDO_USER:-$USER}"
+    REAL_HOME=$(eval echo "~$REAL_USER")
+    DESKTOP_DIR="$REAL_HOME/.local/share/applications"
+    mkdir -p "$DESKTOP_DIR"
+    cp "$SCRIPT_DIR/fan-aggressor.desktop" "$DESKTOP_DIR/"
+    chown "$REAL_USER":"$REAL_USER" "$DESKTOP_DIR/fan-aggressor.desktop"
+    update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
+    echo "   Atalho instalado no menu de aplicações"
+fi
+
+echo "5. Habilitando e iniciando serviços..."
+fan_aggressor enable 2>/dev/null || true
+systemctl enable --now fan-aggressor 2>/dev/null && \
+    echo "   fan-aggressor: ativo e habilitado no boot" || \
+    echo "   fan-aggressor: habilitado (pode precisar de reinício)"
+systemctl enable --now epp-override 2>/dev/null && \
+    echo "   epp-override: ativo e habilitado no boot" || \
+    echo "   epp-override: habilitado (pode precisar de reinício)"
+
 echo ""
 echo "=== Instalação concluída! ==="
 echo ""
+echo "Interface Gráfica:"
+echo "  Procure 'Fan Aggressor' no menu de aplicações"
+echo ""
 echo "Comandos:"
 echo "  fan_aggressor status          - Ver status e backends disponíveis"
-echo "  fan_aggressor set cpu +10     - Aumentar agressividade CPU"
-echo "  fan_aggressor set gpu +10     - Aumentar agressividade GPU"
-echo "  fan_aggressor set both +10    - Aumentar ambos"
-echo "  fan_aggressor backend auto    - Selecionar backend (auto|ec|nekro|predator)"
+echo "  fan_aggressor set both +10    - Ajustar offset dos fans"
 echo "  fan_aggressor enable          - Ativar controle"
 echo "  fan_aggressor disable         - Desativar controle"
 echo ""
-echo "Para iniciar o serviço:"
-echo "  sudo systemctl start fan-aggressor"
-echo "  sudo systemctl enable fan-aggressor"
-echo ""
-echo "Para ver logs:"
+echo "Logs:"
 echo "  journalctl -u fan-aggressor -f"
 echo ""

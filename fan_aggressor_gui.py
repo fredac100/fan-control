@@ -39,6 +39,28 @@ STATE_FILE = Path("/var/run/fan-aggressor.state")
 PID_FILE = Path("/var/run/fan-aggressor.pid")
 
 
+def acquire_sudo() -> bool:
+    try:
+        proc = subprocess.run(
+            ["pkexec", "sudo", "-v"],
+            capture_output=True, timeout=60
+        )
+        return proc.returncode == 0
+    except Exception:
+        return False
+
+
+def refresh_sudo() -> bool:
+    try:
+        proc = subprocess.run(
+            ["sudo", "-vn"],
+            capture_output=True, timeout=5
+        )
+        return proc.returncode == 0
+    except Exception:
+        return False
+
+
 def load_config() -> Dict[str, Any]:
     default = {
         "cpu_fan_offset": 0,
@@ -196,10 +218,15 @@ class FanAggressorApp(Adw.Application):
         self.config = load_config()
         self.updating = False
         self.refresh_timeout_id = None
+        self.sudo_refresh_timeout_id = None
 
     def do_activate(self):
         win = self.props.active_window
         if not win:
+            threading.Thread(target=acquire_sudo, daemon=True).start()
+            self.sudo_refresh_timeout_id = GLib.timeout_add_seconds(
+                300, self._refresh_sudo_timestamp
+            )
             win = self._build_window()
         win.present()
 
@@ -788,10 +815,17 @@ class FanAggressorApp(Adw.Application):
         self._refresh_all()
         return True
 
+    def _refresh_sudo_timestamp(self) -> bool:
+        threading.Thread(target=refresh_sudo, daemon=True).start()
+        return True
+
     def _on_close(self, window):
         if self.refresh_timeout_id:
             GLib.source_remove(self.refresh_timeout_id)
             self.refresh_timeout_id = None
+        if self.sudo_refresh_timeout_id:
+            GLib.source_remove(self.sudo_refresh_timeout_id)
+            self.sudo_refresh_timeout_id = None
         return False
 
 

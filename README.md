@@ -4,7 +4,7 @@ Controle de ventiladores e gerenciamento de energia CPU para o **Acer Predator H
 
 > **Aviso**: Desenvolvido e testado exclusivamente no **Acer Predator PHN16-72**. Sem garantia para outros modelos.
 
-[Fan Aggressor GUI](docs/screenshot.png)
+![Fan Aggressor GUI](docs/screenshot.png)
 
 ## Instalação Rápida (uma linha)
 
@@ -176,16 +176,9 @@ sudo ./install.sh
 
 ```bash
 sudo apt install libgtk-4-1 libadwaita-1-0 python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1
-./install_gui.sh
 ```
 
-### 4. Habilitar serviços
-
-```bash
-sudo fan_aggressor enable
-sudo systemctl enable --now fan-aggressor
-sudo systemctl enable --now epp-override
-```
+> O `install.sh` já habilita e inicia os serviços automaticamente, instala o ícone e adiciona o atalho no menu de aplicações.
 
 ## Troubleshooting
 
