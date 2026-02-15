@@ -12,24 +12,33 @@ Este projeto depende do módulo kernel [nekro-sense](https://github.com/fredac10
 
 ## Funcionalidades
 
-### Controle de Ventiladores
-- **Curva dinâmica de temperatura** - Velocidade dos fans varia conforme a temperatura
-- **Offset configurável** - Adiciona ou remove porcentagem sobre a curva base
-- **Modo Híbrido** - Ativa boost apenas quando temperatura atinge threshold
-- **Controle separado CPU/GPU** - Offsets independentes para cada ventilador
+### 🎨 Interface Gráfica Moderna
+- **GTK4/Libadwaita** - UI nativa do GNOME, design clean e responsivo
+- **Layout em duas colunas** - Fans à esquerda, CPU power à direita
+- **Controles visuais** - Sliders, toggles, dropdowns intuitivos
+- **Status em tempo real** - Velocidades, temperaturas, boost status atualizam automaticamente
+- **5 Power Profiles** - Deep Sleep, Stealth Mode, Cruise Control, Boost Drive, Nitro Overdrive
+- **Sincronização com hardware** - Detecta mudanças do botão físico Predator
 
-### Gerenciamento de Energia CPU
-- **Power Profiles** - 5 perfis pré-configurados com aplicação instantânea
-- **CPU Governor** - Alterna entre `performance` e `powersave`
-- **Intel Turbo Boost** - Liga/desliga turbo boost
-- **Energy Performance Preference (EPP)** - 5 níveis de performance/economia
-- **EPP Override** - Corrige mapeamento automático do botão Predator
+### 🌡️ Controle de Ventiladores
+- **Modo Híbrido inteligente** - Captura curva do fabricante, adiciona offset apenas quando necessário
+- **Offset configurável** - CPU e GPU independentes (-100% a +100%)
+- **Thresholds personalizáveis** - Controle de quando o boost ativa/desativa
+- **Snapshot de RPM real** - Respeita a curva dinâmica do fabricante, sem substituí-la
+- **Daemon automático** - Monitora temperatura e ajusta fans continuamente
 
-### Interface
-- **GUI GTK4** - Interface gráfica moderna com libadwaita em duas colunas
-- **CLI completa** - Controle via linha de comando
-- **Integração com nekro-sense** - Funciona em conjunto com o módulo kernel
-- **Status em tempo real** - Monitoramento de fans, temperatura e CPU power
+### ⚡ Gerenciamento de Energia CPU
+- **5 Power Profiles pré-configurados** - Do "Deep Sleep" (economia extrema) ao "Nitro Overdrive" (performance máxima)
+- **CPU Governor** - `powersave` ou `performance`
+- **Intel Turbo Boost** - Controle fino de turbo (ON/OFF)
+- **EPP (Energy Performance Preference)** - 5 níveis (power, balance_power, balance_performance, performance, default)
+- **EPP Override** - Corrige mapeamento incorreto do botão físico Predator
+
+### 🔧 Integração e CLI
+- **CLI completa** - Todos os recursos acessíveis via linha de comando
+- **Integração nekro-sense** - Funciona em conjunto com o módulo kernel
+- **Serviços systemd** - Daemon principal + EPP override
+- **Config auto-reload** - Mudanças no config.json aplicadas em tempo real
 
 ## Como Funciona
 
@@ -58,6 +67,18 @@ No momento da ativação (60°C):
 
 O snapshot permanece fixo até a temperatura cair abaixo do disengage ou variar significativamente.
 
+### Interface Gráfica
+
+O Fan Aggressor possui uma **interface gráfica moderna** em GTK4/Libadwaita que facilita o uso:
+
+- **Controle visual de fans** - Sliders para offset, toggles para enable/hybrid mode
+- **Status em tempo real** - Velocidades, temperaturas, boost status atualizam automaticamente
+- **Power Profiles** - 5 perfis pré-configurados (Deep Sleep, Stealth, Cruise Control, Boost Drive, Nitro Overdrive)
+- **CPU Power Management** - Controles de governor, turbo boost e EPP integrados
+- **Layout em duas colunas** - Fans à esquerda, CPU power à direita
+
+Veja detalhes completos na seção **"Uso → Interface Gráfica"**.
+
 ### EPP Override para Botão Predator
 
 O botão físico de energia do Predator possui 4 estágios, mas o `power-profiles-daemon` mapeia incorretamente o modo `balanced` para `balance_performance` ao invés de `balance_power`. O serviço `epp-override` corrige isso automaticamente:
@@ -85,11 +106,20 @@ O perfil ativo é indicado visualmente. Os perfis sincronizam com o botão físi
 
 ## Requisitos
 
-- Linux com kernel 5.x+
-- [nekro-sense](https://github.com/fredac100/nekro-sense) instalado e funcionando
+### Sistema
+- **Notebook**: Acer Predator Helios Neo 16 (PHN16-72)
+- **OS**: Linux com kernel 5.x+ (testado em Ubuntu 24.04+)
+- **Módulo kernel**: [nekro-sense](https://github.com/fredac100/nekro-sense) instalado e funcionando
+- **CPU**: Intel (para controles de turbo boost e EPP via `intel_pstate`)
+
+### Software
 - Python 3.8+
-- GTK4 e libadwaita (para GUI)
-- `intel_pstate` driver (para controles de CPU power)
+- systemd (para daemon e serviços)
+
+### Dependências da GUI (opcional mas recomendado)
+- GTK4: `sudo apt install libgtk-4-1`
+- libadwaita: `sudo apt install libadwaita-1-0`
+- PyGObject: `sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1`
 
 ## Instalação
 
@@ -147,27 +177,79 @@ sudo fan_aggressor status
 journalctl -u fan-aggressor -f
 ```
 
-### 5. Instalar GUI (Opcional)
+### 5. Instalar GUI (Recomendado)
+
+A interface gráfica facilita muito o uso e permite ajustes em tempo real.
 
 ```bash
 ./install_gui.sh
 ```
 
-Isso instala o ícone e adiciona entrada no menu de aplicações.
+Isso instala:
+- Entrada no menu de aplicações (categoria System Tools)
+- Ícone do aplicativo
+- Desktop file em `/usr/share/applications/fan-aggressor.desktop`
+
+Após instalar, procure **"Fan Aggressor"** no menu do sistema ou execute:
+```bash
+./fan_aggressor_gui.py
+```
+
+**Requisitos da GUI:**
+- Python 3.8+
+- GTK4 (`sudo apt install libgtk-4-1` ou equivalente)
+- libadwaita (`sudo apt install libadwaita-1-0`)
+- PyGObject (`sudo apt install python3-gi`)
 
 ## Uso
 
-### Interface Gráfica
+### Interface Gráfica (Recomendado)
+
+![Fan Aggressor GUI](screenshot.png)
+
+A interface gráfica é a forma mais fácil de usar o Fan Aggressor. Para iniciar:
 
 ```bash
 ./fan_aggressor_gui.py
 ```
 
-Ou procure "Fan Aggressor" no menu de aplicações.
+Ou procure **"Fan Aggressor"** no menu de aplicações.
 
-A GUI possui **duas colunas**:
-- **Esquerda**: Status, controle de fans, offsets e thresholds
-- **Direita**: CPU Power Management (governor, turbo, EPP) e CPU Status (valores em tempo real)
+#### Layout em Duas Colunas
+
+**Coluna Esquerda - Controle de Fans:**
+- **Status**: Service status, modo (híbrido/fixo), temperatura atual, velocidades dos fans em RPM e %
+- **Boost Status**: Mostra se o offset está ativo e o cálculo (base + offset = final)
+- **Control**: Habilitar/desabilitar controle, modo híbrido, botão restart service
+- **Fan Offset**: Sliders para ajustar offset de CPU e GPU (-100 a +100%), com toggle "Link CPU and GPU"
+- **Temperature Thresholds**: Sliders para engage (ativar offset) e disengage (voltar ao AUTO)
+
+**Coluna Direita - CPU Power Management:**
+- **Governor**: Dropdown para escolher `powersave` ou `performance`
+- **Turbo Boost**: Toggle para Intel Turbo Boost (ON/OFF)
+- **Energy Performance Preference (EPP)**: Dropdown com 5 níveis (power, balance_power, balance_performance, performance, default)
+- **Power Profiles**: 5 perfis pré-configurados com um clique:
+  - **Deep Sleep** - Economia extrema (powersave, turbo OFF, power)
+  - **Stealth Mode** - Silencioso (powersave, turbo OFF, power)
+  - **Cruise Control** - Balanceado (powersave, turbo ON, balance_power)
+  - **Boost Drive** - Performance eficiente (powersave, turbo ON, balance_performance)
+  - **Nitro Overdrive** - Performance máxima (performance, turbo ON, performance) ← Perfil ativo indicado visualmente
+
+#### Recursos da GUI
+
+- **Atualização em tempo real**: Status, temperaturas e fan speeds atualizam automaticamente
+- **Validação inteligente**: Previne configurações inválidas (ex: disengage > engage)
+- **Sincronização com botão físico**: Detecta mudanças do botão Predator e atualiza a UI
+- **Permissões automáticas**: Usa `pkexec` para solicitar senha quando necessário (CPU power)
+- **Visual feedback**: Perfil ativo destacado, cores de status (verde=running, vermelho=stopped)
+
+#### Dicas de Uso na GUI
+
+1. **Primeira vez**: Ative "Enabled" e "Hybrid Mode", ajuste offset para +10% ou +15%
+2. **Gaming**: Use perfil "Nitro Overdrive" + offset +20% a +30%
+3. **Trabalho silencioso**: Use perfil "Stealth Mode" + offset 0% ou -5%
+4. **Ajuste fino**: Use os sliders de threshold para controlar quando o boost ativa
+5. **Monitoramento**: Acompanhe o "Boost Status" para ver a base capturada e o offset aplicado
 
 ### Linha de Comando
 
@@ -355,37 +437,66 @@ Módulo para leitura de fan speeds e temperaturas via hwmon (`/sys/class/hwmon`)
 
 ## Exemplos de Uso
 
-### Gaming (mais resfriamento + performance)
+### Gaming (mais resfriamento + performance máxima)
 
+**Via GUI:**
+1. Abra Fan Aggressor
+2. Clique no perfil **"Nitro Overdrive"** (performance + turbo)
+3. Ajuste offset para **+20% a +30%** com os sliders
+4. Verifique que "Enabled" e "Hybrid Mode" estão ativos
+
+**Via CLI:**
 ```bash
-fan_aggressor set both +20
+fan_aggressor set both +25
 fan_aggressor enable
-# Via GUI: perfil "Nitro Overdrive"
 ```
 
 ### Trabalho silencioso (economia de energia)
 
-```bash
-fan_aggressor set both -5
-fan_aggressor enable
-# Via GUI: perfil "Stealth Mode"
-```
+**Via GUI:**
+1. Clique no perfil **"Stealth Mode"** (powersave, sem turbo)
+2. Ajuste offset para **0%** ou **-5%** (use com cuidado!)
+3. Monitor temperatura — se passar de 80°C, aumente o offset
 
-### Balanced (padrão recomendado)
-
+**Via CLI:**
 ```bash
 fan_aggressor set both 0
 fan_aggressor enable
-# Via GUI: perfil "Cruise Control"
 ```
 
-### Desativar controle de fans temporariamente
+### Uso diário balanceado (recomendado)
 
+**Via GUI:**
+1. Clique no perfil **"Cruise Control"** (powersave com turbo, balance_power)
+2. Offset **+10% a +15%**
+3. Thresholds padrão (engage 70°C, disengage 65°C)
+
+**Via CLI:**
+```bash
+fan_aggressor set both +10
+fan_aggressor enable
+```
+
+### Ajuste fino de thresholds (apenas via GUI ou config)
+
+**Cenário**: Você quer que o offset ative mais cedo (temperatura mais baixa)
+
+**Via GUI:**
+1. Vá até "Temperature Thresholds"
+2. Arraste "Engage" para **60°C**
+3. Arraste "Disengage" para **55°C**
+4. O boost ativa mais cedo, mantém fans mais frescos
+
+### Desativar controle temporariamente
+
+**Via GUI:** Desmarque "Enabled" na seção Control
+
+**Via CLI:**
 ```bash
 fan_aggressor disable
 ```
 
-Os fans voltam ao modo automático do sistema.
+Os fans voltam ao modo automático do hardware.
 
 ## Avisos
 
