@@ -2,6 +2,18 @@
 
 Fan control and CPU power management for the **Acer Predator Helios Neo 16 (PHN16-72)** on Linux.
 
+### What does Fan Aggressor actually do?
+
+Fan Aggressor is **not** a traditional fan controller that replaces your fan curve with fixed speeds. Instead, it works **on top of** the manufacturer's automatic fan curve.
+
+Think of it like this: your laptop already knows how to manage its fans — it ramps them up when things get hot and slows them down when they cool off. Fan Aggressor doesn't interfere with that intelligence. What it does is give the fans a **standing instruction**: *"when the CPU hits 70°C, take whatever speed you're already running at and add 25% more."*
+
+The key difference:
+- **Traditional fan control**: "Run at 3000 RPM." (ignores what the system thinks)
+- **Fan Aggressor**: "Whatever speed you'd normally be at, push 25% harder." (respects and amplifies the system's own decisions)
+
+When the temperature drops back below the threshold, Fan Aggressor steps aside completely and lets the manufacturer's curve run untouched. The result is a fan behavior that still feels natural — it just reacts more aggressively (or more gently, with a negative offset) within the temperature range you define.
+
 > **Warning**: Developed and tested exclusively on the **Acer Predator PHN16-72**. No guarantees for other models.
 
 ![Fan Aggressor GUI](docs/screenshot.png)
