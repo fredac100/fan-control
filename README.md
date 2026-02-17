@@ -1,6 +1,11 @@
 # Fan Aggressor
 
-Fan control and CPU power management for the **Acer Predator Helios Neo 16 (PHN16-72)** on Linux.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.8+](https://img.shields.io/badge/Python-3.8%2B-green.svg)](https://www.python.org/)
+[![Ubuntu 24.04+](https://img.shields.io/badge/Ubuntu-24.04%2B-orange.svg)](https://ubuntu.com/)
+
+Fan control and CPU power management for **Acer Predator** notebooks on Linux.
+Built on top of [nekro-sense](https://github.com/fredac100/nekro-sense) (kernel module for Acer WMI hardware access).
 
 ### What does Fan Aggressor actually do?
 
@@ -14,9 +19,11 @@ The key difference:
 
 When the temperature drops back below the threshold, Fan Aggressor steps aside completely and lets the manufacturer's curve run untouched. The result is a fan behavior that still feels natural — it just reacts more aggressively (or more gently, with a negative offset) within the temperature range you define.
 
-> **Warning**: Developed and tested exclusively on the **Acer Predator PHN16-72**. No guarantees for other models.
-
-![Fan Aggressor GUI](docs/screenshot.png)
+<p align="center">
+  <img src="docs/screenshot.png" alt="Fan Aggressor GUI" width="700">
+  <br>
+  <em>Real-time monitoring with hybrid fan control active</em>
+</p>
 
 ## Quick Install (one-liner)
 
@@ -90,13 +97,15 @@ journalctl -u fan-aggressor -f
 
 ### Power Profiles
 
-| Profile | Governor | Turbo | EPP | Use Case |
-|---------|----------|-------|-----|----------|
-| **Deep Sleep** | powersave | OFF | power | Extreme battery saving |
-| **Stealth Mode** | powersave | OFF | power | Silent operation |
-| **Cruise Control** | powersave | ON | balance_power | Daily use |
-| **Boost Drive** | powersave | ON | balance_performance | Productivity |
-| **Nitro Overdrive** | performance | ON | performance | Gaming |
+| Profile | Governor | Turbo | EPP | Platform Profile | Use Case |
+|---------|----------|-------|-----|------------------|----------|
+| **Deep Sleep** | powersave | OFF | power | low-power | Extreme battery saving |
+| **Stealth Mode** | powersave | OFF | power | — | Silent operation |
+| **Cruise Control** | powersave | ON | balance_power | — | Daily use |
+| **Boost Drive** | powersave | ON | balance_performance | — | Productivity |
+| **Nitro Overdrive** | performance | ON | performance | — | Gaming |
+
+> **Deep Sleep** vs **Stealth Mode**: both disable turbo and use maximum power saving, but Deep Sleep also forces the `low-power` platform profile, which may further reduce hardware clocks and fan activity at the firmware level.
 
 ## How It Works
 
@@ -255,10 +264,14 @@ fan_aggressor (CLI) ──► fan_aggressor.py (daemon) ───► cpu_power.p
 
 ## Requirements
 
-- **Notebook**: Acer Predator Helios Neo 16 (PHN16-72)
 - **OS**: Linux with kernel 5.x+ (tested on Ubuntu 24.04+)
 - **CPU**: Intel (for Turbo Boost and EPP via `intel_pstate`)
 - **Python**: 3.8+
+- **Hardware**: Requires [nekro-sense](https://github.com/fredac100/nekro-sense) kernel module
+
+## Compatibility
+
+Developed and tested on the **Acer Predator Helios Neo 16 (PHN16-72)**. May work on other Acer Predator models supported by [nekro-sense](https://github.com/fredac100/nekro-sense) — if you get it running on a different model, PRs and reports are welcome.
 
 ## License
 
