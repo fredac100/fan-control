@@ -15,7 +15,8 @@ ALLOWED_CONFIG_KEYS = {
     "cpu_fan_offset", "gpu_fan_offset", "enabled", "poll_interval",
     "hybrid_mode", "temp_threshold_engage", "temp_threshold_disengage",
     "cpu_governor", "cpu_turbo_enabled", "cpu_epp", "cpu_platform_profile",
-    "link_offsets", "nekroctl_path", "failsafe_mode"
+    "link_offsets", "nekroctl_path", "failsafe_mode",
+    "cpu_rapl_pl1_w", "cpu_rapl_pl2_w", "cpu_max_freq_mhz"
 }
 
 
@@ -47,7 +48,10 @@ def apply_cpu_power():
         if p not in sys.path:
             sys.path.insert(0, p)
 
-    from cpu_power import set_governor, set_turbo, set_epp
+    from cpu_power import (
+        set_governor, set_turbo, set_epp,
+        set_rapl_pl1, set_rapl_pl2, set_cpu_max_freq,
+    )
 
     params = json.loads(sys.stdin.read())
     gov = params.get("governor")
@@ -60,6 +64,18 @@ def apply_cpu_power():
     set_turbo(turbo)
     if epp:
         set_epp(epp, platform_profile=pp)
+
+    pl1 = params.get("pl1_watts")
+    if pl1 is not None:
+        set_rapl_pl1(int(pl1))
+
+    pl2 = params.get("pl2_watts")
+    if pl2 is not None:
+        set_rapl_pl2(int(pl2))
+
+    max_freq = params.get("max_freq_mhz")
+    if max_freq is not None:
+        set_cpu_max_freq(int(max_freq))
 
 
 def main():

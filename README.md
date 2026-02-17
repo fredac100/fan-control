@@ -93,19 +93,24 @@ journalctl -u fan-aggressor -f
 - **Governor** — `powersave` or `performance`
 - **Intel Turbo Boost** — ON/OFF
 - **EPP** — 5 energy efficiency levels
+- **TDP Sustentado (PL1)** — Sustained power limit via Intel RAPL (15–200W)
+- **TDP Burst (PL2)** — Short-term burst power limit via Intel RAPL (20–250W)
+- **Max Frequency** — Per-core scaling limit (800–5500 MHz)
 - **EPP Override** — Corrects physical Predator button mapping
 
 ### Power Profiles
 
-| Profile | Governor | Turbo | EPP | Platform Profile | Use Case |
-|---------|----------|-------|-----|------------------|----------|
-| **Deep Sleep** | powersave | OFF | power | low-power | Extreme battery saving |
-| **Stealth Mode** | powersave | OFF | power | — | Silent operation |
-| **Cruise Control** | powersave | ON | balance_power | — | Daily use |
-| **Boost Drive** | powersave | ON | balance_performance | — | Productivity |
-| **Nitro Overdrive** | performance | ON | performance | — | Gaming |
+| Profile | Governor | Turbo | EPP | PL1 | PL2 | Max Freq | Use Case |
+|---------|----------|-------|-----|-----|-----|----------|----------|
+| **Deep Sleep** | powersave | OFF | power | 15W | 20W | 2000 MHz | Extreme battery saving |
+| **Stealth Mode** | powersave | OFF | power | 25W | 35W | 3200 MHz | Silent operation |
+| **Cruise Control** | powersave | ON | balance_power | 45W | 65W | 4400 MHz | Daily use |
+| **Boost Drive** | powersave | ON | balance_performance | 65W | 100W | 5300 MHz | Productivity |
+| **Nitro Overdrive** | performance | ON | performance | 125W | 157W | 5500 MHz | Gaming |
 
-> **Deep Sleep** vs **Stealth Mode**: both disable turbo and use maximum power saving, but Deep Sleep also forces the `low-power` platform profile, which may further reduce hardware clocks and fan activity at the firmware level.
+> **Deep Sleep** vs **Stealth Mode**: both disable turbo and use maximum power saving, but Deep Sleep also forces the `low-power` platform profile, which may further reduce hardware clocks and fan activity at the firmware level. Deep Sleep additionally caps TDP to 15W — ideal for reading or writing on battery.
+
+> **TDP controls** use Intel RAPL (Running Average Power Limit) via `/sys/class/powercap`. PL1 sets the sustained power budget; PL2 allows short bursts above PL1. The GUI enforces PL2 ≥ PL1 automatically.
 
 ## How It Works
 
@@ -135,7 +140,10 @@ File: `/etc/fan-aggressor/config.json`
   "temp_threshold_disengage": 65,
   "cpu_governor": "powersave",
   "cpu_turbo_enabled": true,
-  "cpu_epp": "balance_performance"
+  "cpu_epp": "balance_performance",
+  "cpu_rapl_pl1_w": null,
+  "cpu_rapl_pl2_w": null,
+  "cpu_max_freq_mhz": null
 }
 ```
 
@@ -154,6 +162,9 @@ The daemon automatically reloads the config — no need to restart the service.
 | `cpu_governor` | CPU governor | powersave, performance |
 | `cpu_turbo_enabled` | Turbo Boost | true/false |
 | `cpu_epp` | Energy Performance Preference | power, balance_power, balance_performance, performance |
+| `cpu_rapl_pl1_w` | Sustained TDP (PL1) | 15–200 W (null = hardware default) |
+| `cpu_rapl_pl2_w` | Burst TDP (PL2) | 20–250 W (null = hardware default) |
+| `cpu_max_freq_mhz` | Maximum CPU frequency | 800–5500 MHz (null = hardware default) |
 
 ## Use Cases
 

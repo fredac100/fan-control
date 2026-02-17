@@ -186,7 +186,10 @@ class FanAggressor:
             "cpu_epp": "balance_performance",
             "cpu_platform_profile": "",
             "nekroctl_path": None,
-            "failsafe_mode": "auto"
+            "failsafe_mode": "auto",
+            "cpu_rapl_pl1_w": None,
+            "cpu_rapl_pl2_w": None,
+            "cpu_max_freq_mhz": None
         }
         if self.config_path.exists():
             try:
@@ -244,6 +247,36 @@ class FanAggressor:
         if nekroctl_path and not _is_nekroctl_path_allowed(nekroctl_path):
             nekroctl_path = None
         config["nekroctl_path"] = nekroctl_path if nekroctl_path else None
+
+        pl1 = config.get("cpu_rapl_pl1_w")
+        if pl1 is not None:
+            try:
+                pl1 = int(pl1)
+                config["cpu_rapl_pl1_w"] = max(15, min(200, pl1))
+            except (TypeError, ValueError):
+                config["cpu_rapl_pl1_w"] = None
+
+        pl2 = config.get("cpu_rapl_pl2_w")
+        if pl2 is not None:
+            try:
+                pl2 = int(pl2)
+                config["cpu_rapl_pl2_w"] = max(20, min(250, pl2))
+            except (TypeError, ValueError):
+                config["cpu_rapl_pl2_w"] = None
+
+        if (config.get("cpu_rapl_pl1_w") is not None
+                and config.get("cpu_rapl_pl2_w") is not None
+                and config["cpu_rapl_pl2_w"] < config["cpu_rapl_pl1_w"]):
+            config["cpu_rapl_pl2_w"] = config["cpu_rapl_pl1_w"]
+
+        max_freq = config.get("cpu_max_freq_mhz")
+        if max_freq is not None:
+            try:
+                max_freq = int(max_freq)
+                config["cpu_max_freq_mhz"] = max(800, min(5500, max_freq))
+            except (TypeError, ValueError):
+                config["cpu_max_freq_mhz"] = None
+
         return config
 
     def _save_config(self):
@@ -348,7 +381,10 @@ class FanAggressor:
             self.config.get("cpu_governor"),
             self.config.get("cpu_turbo_enabled"),
             self.config.get("cpu_epp"),
-            self.config.get("cpu_platform_profile", "")
+            self.config.get("cpu_platform_profile", ""),
+            self.config.get("cpu_rapl_pl1_w"),
+            self.config.get("cpu_rapl_pl2_w"),
+            self.config.get("cpu_max_freq_mhz"),
         )
 
     def _acquire_pid_lock(self):

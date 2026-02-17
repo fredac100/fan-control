@@ -31,8 +31,16 @@ from cpu_power import (
     get_available_governors, get_current_governor,
     get_available_epp, get_current_epp,
     get_turbo_enabled, get_platform_profile,
-    set_governor, set_epp, set_turbo
+    set_governor, set_epp, set_turbo,
+    get_rapl_pl1_watts, get_rapl_pl2_watts,
+    get_cpu_max_freq_mhz, get_cpu_hw_max_freq_mhz,
+    set_rapl_pl1, set_rapl_pl2, set_cpu_max_freq,
+    RAPL_PL1_MIN_W, RAPL_PL1_MAX_W,
+    RAPL_PL2_MIN_W, RAPL_PL2_MAX_W,
+    CPU_FREQ_MIN_MHZ, CPU_FREQ_MAX_MHZ,
 )
+
+FREQ_OPTIONS_MHZ = [800, 1200, 1600, 2000, 2400, 2800, 3200, 3600, 4000, 4400, 4800, 5100, 5300, 5500]
 
 CONFIG_FILE = Path("/etc/fan-aggressor/config.json")
 STATE_FILE = Path("/var/run/fan-aggressor.state")
@@ -65,7 +73,10 @@ def load_config() -> Dict[str, Any]:
         "cpu_platform_profile": "",
         "link_offsets": True,
         "nekroctl_path": None,
-        "failsafe_mode": "auto"
+        "failsafe_mode": "auto",
+        "cpu_rapl_pl1_w": None,
+        "cpu_rapl_pl2_w": None,
+        "cpu_max_freq_mhz": None
     }
     if CONFIG_FILE.exists():
         try:
@@ -413,6 +424,43 @@ class FanAggressorApp(Adw.Application):
         self.epp_row.connect("notify::selected", self._on_cpu_power_changed)
         group.add(self.epp_row)
 
+        self.pl1_row = Adw.SpinRow(
+            title="TDP Sustentado (PL1)",
+            subtitle="Limite de potência sustentado em watts",
+            adjustment=Gtk.Adjustment(
+                lower=RAPL_PL1_MIN_W, upper=RAPL_PL1_MAX_W,
+                step_increment=5, page_increment=10,
+                value=self.config.get("cpu_rapl_pl1_w") or get_rapl_pl1_watts() or RAPL_PL1_MAX_W
+            )
+        )
+        self.pl1_row.connect("notify::value", self._on_cpu_power_changed)
+        group.add(self.pl1_row)
+
+        self.pl2_row = Adw.SpinRow(
+            title="TDP Burst (PL2)",
+            subtitle="Limite de potência burst em watts (>= PL1)",
+            adjustment=Gtk.Adjustment(
+                lower=RAPL_PL2_MIN_W, upper=RAPL_PL2_MAX_W,
+                step_increment=5, page_increment=10,
+                value=self.config.get("cpu_rapl_pl2_w") or get_rapl_pl2_watts() or 157
+            )
+        )
+        self.pl2_row.connect("notify::value", self._on_cpu_power_changed)
+        group.add(self.pl2_row)
+
+        freq_labels = [f"{f} MHz" for f in FREQ_OPTIONS_MHZ]
+        self.freq_items = Gtk.StringList.new(freq_labels)
+        self.freq_row = Adw.ComboRow(
+            title="Freq. Máxima",
+            subtitle="Frequência máxima do CPU",
+            model=self.freq_items
+        )
+        current_freq = self.config.get("cpu_max_freq_mhz") or get_cpu_max_freq_mhz() or CPU_FREQ_MAX_MHZ
+        closest_idx = min(range(len(FREQ_OPTIONS_MHZ)), key=lambda i: abs(FREQ_OPTIONS_MHZ[i] - current_freq))
+        self.freq_row.set_selected(closest_idx)
+        self.freq_row.connect("notify::selected", self._on_cpu_power_changed)
+        group.add(self.freq_row)
+
         parent.append(group)
 
     def _build_power_profiles_group(self, parent: Gtk.Box):
@@ -424,19 +472,24 @@ class FanAggressorApp(Adw.Application):
         profiles = [
             ("deepsleep", "Deep Sleep", "Economia extrema, CPU no minimo absoluto",
              {"cpu_governor": "powersave", "cpu_turbo_enabled": False, "cpu_epp": "power",
-              "cpu_platform_profile": "low-power"}),
+              "cpu_platform_profile": "low-power",
+              "cpu_rapl_pl1_w": 15, "cpu_rapl_pl2_w": 20, "cpu_max_freq_mhz": 2000}),
             ("stealth", "Stealth Mode", "Silencioso, sem turbo, economia total",
              {"cpu_governor": "powersave", "cpu_turbo_enabled": False, "cpu_epp": "power",
-              "cpu_platform_profile": ""}),
+              "cpu_platform_profile": "",
+              "cpu_rapl_pl1_w": 25, "cpu_rapl_pl2_w": 35, "cpu_max_freq_mhz": 3200}),
             ("cruise", "Cruise Control", "Equilibrado, turbo sob demanda",
              {"cpu_governor": "powersave", "cpu_turbo_enabled": True, "cpu_epp": "balance_power",
-              "cpu_platform_profile": ""}),
+              "cpu_platform_profile": "",
+              "cpu_rapl_pl1_w": 45, "cpu_rapl_pl2_w": 65, "cpu_max_freq_mhz": 4400}),
             ("boost", "Boost Drive", "Alta performance com eficiencia",
              {"cpu_governor": "powersave", "cpu_turbo_enabled": True, "cpu_epp": "balance_performance",
-              "cpu_platform_profile": ""}),
+              "cpu_platform_profile": "",
+              "cpu_rapl_pl1_w": 65, "cpu_rapl_pl2_w": 100, "cpu_max_freq_mhz": 5300}),
             ("nitro", "Nitro Overdrive", "Performance maxima, sem limites",
              {"cpu_governor": "performance", "cpu_turbo_enabled": True, "cpu_epp": "performance",
-              "cpu_platform_profile": ""}),
+              "cpu_platform_profile": "",
+              "cpu_rapl_pl1_w": 125, "cpu_rapl_pl2_w": 157, "cpu_max_freq_mhz": 5500}),
         ]
 
         for profile_id, title, subtitle, settings in profiles:
@@ -475,6 +528,18 @@ class FanAggressorApp(Adw.Application):
         epp = settings.get("cpu_epp", "balance_performance")
         if epp in epp_list:
             self.epp_row.set_selected(epp_list.index(epp))
+
+        pl1 = settings.get("cpu_rapl_pl1_w")
+        if pl1 is not None:
+            self.pl1_row.set_value(pl1)
+        pl2 = settings.get("cpu_rapl_pl2_w")
+        if pl2 is not None:
+            self.pl2_row.set_value(pl2)
+        freq = settings.get("cpu_max_freq_mhz")
+        if freq is not None:
+            closest_idx = min(range(len(FREQ_OPTIONS_MHZ)), key=lambda i: abs(FREQ_OPTIONS_MHZ[i] - freq))
+            self.freq_row.set_selected(closest_idx)
+
         self.updating = False
 
         self._save_config()
@@ -535,6 +600,20 @@ class FanAggressorApp(Adw.Application):
 
         self.config["cpu_platform_profile"] = ""
 
+        pl1 = int(self.pl1_row.get_value())
+        pl2 = int(self.pl2_row.get_value())
+        if pl2 < pl1:
+            self.updating = True
+            self.pl2_row.set_value(pl1)
+            self.updating = False
+            pl2 = pl1
+        self.config["cpu_rapl_pl1_w"] = pl1
+        self.config["cpu_rapl_pl2_w"] = pl2
+
+        freq_idx = self.freq_row.get_selected()
+        if 0 <= freq_idx < len(FREQ_OPTIONS_MHZ):
+            self.config["cpu_max_freq_mhz"] = FREQ_OPTIONS_MHZ[freq_idx]
+
         self._save_config()
         self._apply_cpu_power()
         self._update_profile_indicator()
@@ -544,8 +623,19 @@ class FanAggressorApp(Adw.Application):
         turbo = self.config.get("cpu_turbo_enabled", True)
         epp = self.config.get("cpu_epp")
         pp = self.config.get("cpu_platform_profile") or None
+        pl1 = self.config.get("cpu_rapl_pl1_w")
+        pl2 = self.config.get("cpu_rapl_pl2_w")
+        max_freq = self.config.get("cpu_max_freq_mhz")
 
-        if set_governor(gov) and set_turbo(turbo) and set_epp(epp, platform_profile=pp):
+        direct_ok = set_governor(gov) and set_turbo(turbo) and set_epp(epp, platform_profile=pp)
+        if pl1 is not None:
+            direct_ok = set_rapl_pl1(pl1) and direct_ok
+        if pl2 is not None:
+            direct_ok = set_rapl_pl2(pl2) and direct_ok
+        if max_freq is not None:
+            direct_ok = set_cpu_max_freq(max_freq) and direct_ok
+
+        if direct_ok:
             return
 
         def _worker():
@@ -554,6 +644,9 @@ class FanAggressorApp(Adw.Application):
                 "turbo": turbo,
                 "epp": epp,
                 "platform_profile": pp,
+                "pl1_watts": pl1,
+                "pl2_watts": pl2,
+                "max_freq_mhz": max_freq,
             })
             try:
                 run_helper("apply-cpu-power", params)
@@ -755,6 +848,21 @@ class FanAggressorApp(Adw.Application):
         ]
         if current_epp in epp_list:
             self.epp_row.set_selected(epp_list.index(current_epp))
+
+        hw_pl1 = get_rapl_pl1_watts()
+        cfg_pl1 = self.config.get("cpu_rapl_pl1_w")
+        self.pl1_row.set_value(cfg_pl1 if cfg_pl1 is not None else (hw_pl1 or RAPL_PL1_MAX_W))
+
+        hw_pl2 = get_rapl_pl2_watts()
+        cfg_pl2 = self.config.get("cpu_rapl_pl2_w")
+        self.pl2_row.set_value(cfg_pl2 if cfg_pl2 is not None else (hw_pl2 or 157))
+
+        hw_freq = get_cpu_max_freq_mhz()
+        cfg_freq = self.config.get("cpu_max_freq_mhz")
+        current_freq = cfg_freq if cfg_freq is not None else (hw_freq or CPU_FREQ_MAX_MHZ)
+        closest_idx = min(range(len(FREQ_OPTIONS_MHZ)), key=lambda i: abs(FREQ_OPTIONS_MHZ[i] - current_freq))
+        self.freq_row.set_selected(closest_idx)
+
         self.updating = False
 
         self._update_profile_indicator()
