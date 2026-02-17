@@ -173,7 +173,7 @@ class FanAggressorApp(Adw.Application):
     def _build_window(self) -> Adw.ApplicationWindow:
         win = Adw.ApplicationWindow(application=self)
         win.set_title("Fan Aggressor")
-        win.set_default_size(850, 955)
+        win.set_default_size(850, 1015)
         win.set_resizable(True)
 
         icon_theme = Gtk.IconTheme.get_for_display(win.get_display())
@@ -252,11 +252,17 @@ class FanAggressorApp(Adw.Application):
         self.mode_row.add_suffix(self.mode_label)
         group.add(self.mode_row)
 
-        self.temp_row = Adw.ActionRow(title="Temperature")
+        self.temp_row = Adw.ActionRow(title="CPU Temp")
         self.temp_label = Gtk.Label(xalign=1)
         self.temp_label.add_css_class("dim-label")
         self.temp_row.add_suffix(self.temp_label)
         group.add(self.temp_row)
+
+        self.gpu_temp_row = Adw.ActionRow(title="GPU Temp")
+        self.gpu_temp_label = Gtk.Label(xalign=1)
+        self.gpu_temp_label.add_css_class("dim-label")
+        self.gpu_temp_row.add_suffix(self.gpu_temp_label)
+        group.add(self.gpu_temp_row)
 
         self.fan_row = Adw.ActionRow(title="Fan Speeds")
         self.fan_label = Gtk.Label(xalign=1)
@@ -693,11 +699,17 @@ class FanAggressorApp(Adw.Application):
         else:
             self.mode_label.set_text("Fixed Curve")
 
+        cg = self.monitor.get_cpu_gpu_temps()
+        cpu_t = cg["cpu"]
+        gpu_t = cg["gpu"]
         temp = self.monitor.get_max_temp()
-        if temp is None:
-            self.temp_label.set_text("N/A")
-        else:
+        if cpu_t is not None:
+            self.temp_label.set_text(f"{cpu_t:.0f}°C")
+        elif temp is not None:
             self.temp_label.set_text(f"{temp:.0f}°C")
+        else:
+            self.temp_label.set_text("N/A")
+        self.gpu_temp_label.set_text(f"{gpu_t:.0f}°C" if gpu_t is not None else "N/A")
 
         speeds = self.monitor.get_fan_speeds()
         if speeds:
@@ -705,7 +717,7 @@ class FanAggressorApp(Adw.Application):
             fan2 = speeds.get('fan2', 0)
             p1 = rpm_to_percent(fan1)
             p2 = rpm_to_percent(fan2)
-            self.fan_label.set_text(f"CPU: {fan1} RPM ({p1}%) | GPU: {fan2} RPM ({p2}%)")
+            self.fan_label.set_text(f"CPU: {fan1} RPM | GPU: {fan2} RPM")
         else:
             self.fan_label.set_text("N/A")
 

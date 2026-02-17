@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Dict, Optional
 
 FAN_RPM_MIN = 0
 FAN_RPM_MAX = 7500
 
+NVIDIA_SMI_TIMEOUT = 2
+
 
 class FanMonitor:
     def __init__(self):
         self.hwmon_path = None
         self.coretemp_path = None
+        self._nvidia_smi = shutil.which("nvidia-smi")
         self._find_hwmon_devices()
 
     def _find_hwmon_devices(self):
@@ -64,6 +69,33 @@ class FanMonitor:
                 except (ValueError, PermissionError, OSError):
                     pass
         return temps
+
+    def _get_nvidia_gpu_temp(self) -> Optional[float]:
+        if not self._nvidia_smi:
+            return None
+        try:
+            result = subprocess.run(
+                [self._nvidia_smi, "--query-gpu=temperature.gpu",
+                 "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, timeout=NVIDIA_SMI_TIMEOUT
+            )
+            if result.returncode == 0:
+                return float(result.stdout.strip().split("\n")[0])
+        except (subprocess.TimeoutExpired, ValueError, IndexError, OSError):
+            pass
+        return None
+
+    def get_cpu_gpu_temps(self) -> Dict[str, Optional[float]]:
+        temps = self.get_temps()
+        cpu_temp = temps.get("temp1")
+        if cpu_temp is None and not self.hwmon_path and temps:
+            cpu_temp = max(temps.values())
+
+        gpu_temp = temps.get("temp2")
+        if gpu_temp is None or gpu_temp <= 0:
+            gpu_temp = self._get_nvidia_gpu_temp()
+
+        return {"cpu": cpu_temp, "gpu": gpu_temp}
 
     def get_max_temp(self) -> Optional[float]:
         temps = self.get_temps()

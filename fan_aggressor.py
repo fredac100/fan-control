@@ -308,9 +308,15 @@ class FanAggressor:
         print(f"  EPP: {get_current_epp()}")
 
         if temps:
+            cg = self.monitor.get_cpu_gpu_temps()
             print(f"\nTemperaturas:")
+            if cg["cpu"] is not None:
+                print(f"  CPU: {cg['cpu']:.1f}°C")
+            if cg["gpu"] is not None:
+                print(f"  GPU: {cg['gpu']:.1f}°C")
             for name, val in temps.items():
-                print(f"  {name}: {val:.1f}°C")
+                if name not in ("temp1", "temp2"):
+                    print(f"  {name}: {val:.1f}°C")
             max_temp = self.monitor.get_max_temp()
             if max_temp is not None:
                 print(f"  Max: {max_temp:.1f}°C")
@@ -440,6 +446,7 @@ class FanAggressor:
                     continue
                 self.nekroctl_missing_logged = False
 
+                cg_temps = self.monitor.get_cpu_gpu_temps()
                 temp = self.monitor.get_max_temp()
                 if temp is None or temp < MIN_SANE_TEMP or temp > MAX_SANE_TEMP:
                     if self.config.get("failsafe_mode") == "max":
@@ -467,7 +474,10 @@ class FanAggressor:
                         self.snapshot_gpu = rpm_to_duty(speeds.get('fan2', 0)) if speeds else 0
                         self.snapshot_temp = temp
                         self.is_boosting = True
-                        print(f"[{temp:.0f}°C] Offset ATIVADO (base snapshot: CPU {self.snapshot_cpu}%, GPU {self.snapshot_gpu}%)")
+                        cpu_t = cg_temps.get("cpu")
+                        gpu_t = cg_temps.get("gpu")
+                        temp_str = f"CPU {cpu_t:.0f}°C / GPU {gpu_t:.0f}°C" if cpu_t is not None and gpu_t is not None else f"{temp:.0f}°C"
+                        print(f"[{temp_str}] Offset ATIVADO (base snapshot: CPU {self.snapshot_cpu}%, GPU {self.snapshot_gpu}%)")
                     elif self.is_boosting and temp < threshold_disengage:
                         self.is_boosting = False
                         self.snapshot_cpu = 0
@@ -477,7 +487,10 @@ class FanAggressor:
                         clear_state()
                         self.last_cpu = -1
                         self.last_gpu = -1
-                        print(f"[{temp:.0f}°C] Offset DESATIVADO, voltando ao AUTO")
+                        cpu_t = cg_temps.get("cpu")
+                        gpu_t = cg_temps.get("gpu")
+                        temp_str = f"CPU {cpu_t:.0f}°C / GPU {gpu_t:.0f}°C" if cpu_t is not None and gpu_t is not None else f"{temp:.0f}°C"
+                        print(f"[{temp_str}] Offset DESATIVADO, voltando ao AUTO")
                         time.sleep(self.config["poll_interval"])
                         continue
                     if self.is_boosting:
@@ -490,7 +503,10 @@ class FanAggressor:
                                 write_state(True, cpu_offset, gpu_offset, self.snapshot_cpu, self.snapshot_gpu)
                                 self.last_cpu = new_cpu
                                 self.last_gpu = new_gpu
-                                print(f"[{temp:.0f}°C] Fans: CPU {new_cpu}% (base {self.snapshot_cpu}% + {cpu_offset}%), GPU {new_gpu}% (base {self.snapshot_gpu}% + {gpu_offset}%)")
+                                cpu_t = cg_temps.get("cpu")
+                                gpu_t = cg_temps.get("gpu")
+                                temp_str = f"CPU {cpu_t:.0f}°C / GPU {gpu_t:.0f}°C" if cpu_t is not None and gpu_t is not None else f"{temp:.0f}°C"
+                                print(f"[{temp_str}] Fans: CPU {new_cpu}% (base {self.snapshot_cpu}% + {cpu_offset}%), GPU {new_gpu}% (base {self.snapshot_gpu}% + {gpu_offset}%)")
                             else:
                                 self.fan_failures += 1
                                 print("Falha ao setar fans")
