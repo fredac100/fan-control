@@ -488,7 +488,8 @@ class FanAggressor:
                 self.nekroctl_missing_logged = False
 
                 cg_temps = self.monitor.get_cpu_gpu_temps()
-                temp = self.monitor.get_max_temp()
+                _valid = [t for t in cg_temps.values() if t is not None]
+                temp = max(_valid) if _valid else None
                 if temp is None or temp < MIN_SANE_TEMP or temp > MAX_SANE_TEMP:
                     if self.config.get("failsafe_mode") == "max":
                         if set_fan_speed(self.nekroctl_path, 100, 100):
