@@ -140,10 +140,15 @@ def set_rapl(pl1_w: int, pl2_w: int) -> bool:
 
 
 def get_max_freq() -> int:
-    try:
-        return int((CPU_BASE / "cpu0" / SCALING_MAX_FREQ).read_text().strip()) // 1000
-    except (FileNotFoundError, PermissionError, OSError, ValueError):
-        return 0
+    best = 0
+    for freq_file in sorted(CPU_BASE.glob(f"cpu[0-9]*/{SCALING_MAX_FREQ}")):
+        try:
+            mhz = int(freq_file.read_text().strip()) // 1000
+            if mhz > best:
+                best = mhz
+        except (FileNotFoundError, PermissionError, OSError, ValueError):
+            continue
+    return best
 
 
 def set_max_freq(mhz: int) -> bool:

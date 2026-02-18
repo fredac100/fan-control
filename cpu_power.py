@@ -146,23 +146,33 @@ def set_rapl_pl2(watts: int) -> bool:
 
 
 def get_cpu_max_freq_mhz() -> Optional[int]:
-    val = _read_sysfs(f"{CPU_BASE}/cpu0/{SCALING_MAX_FREQ_ATTR}")
-    if val is None:
-        return None
-    try:
-        return int(val) // 1000
-    except (ValueError, TypeError):
-        return None
+    best = None
+    for cpu in _cpu_dirs():
+        val = _read_sysfs(str(cpu / SCALING_MAX_FREQ_ATTR))
+        if val is None:
+            continue
+        try:
+            mhz = int(val) // 1000
+            if best is None or mhz > best:
+                best = mhz
+        except (ValueError, TypeError):
+            continue
+    return best
 
 
 def get_cpu_hw_max_freq_mhz() -> Optional[int]:
-    val = _read_sysfs(f"{CPU_BASE}/cpu0/{CPUINFO_MAX_FREQ}")
-    if val is None:
-        return None
-    try:
-        return int(val) // 1000
-    except (ValueError, TypeError):
-        return None
+    best = None
+    for cpu in _cpu_dirs():
+        val = _read_sysfs(str(cpu / CPUINFO_MAX_FREQ))
+        if val is None:
+            continue
+        try:
+            mhz = int(val) // 1000
+            if best is None or mhz > best:
+                best = mhz
+        except (ValueError, TypeError):
+            continue
+    return best
 
 
 def set_cpu_max_freq(mhz: int) -> bool:
