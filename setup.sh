@@ -83,66 +83,130 @@ install_gui_deps() {
     log_info "GTK4 + Libadwaita instalados"
 }
 
-install_nekro_sense() {
-    log_step "Instalando nekro-sense (módulo kernel)..."
+find_nekro_dir() {
+    local real_user="${SUDO_USER:-$USER}"
+    local real_home=$(eval echo "~$real_user")
 
-    if lsmod | grep -q nekro_sense; then
-        log_info "nekro-sense já está carregado"
+    local candidates=(
+        "$real_home/nekro-sense"
+        "$real_home/projetos/nekro-sense"
+        "$real_home/projects/nekro-sense"
+    )
+
+    for dir in "${candidates[@]}"; do
+        if [ -d "$dir/.git" ]; then
+            echo "$dir"
+            return 0
+        fi
+    done
+
+    local found
+    found=$(find "$real_home" -maxdepth 3 -type d -name "nekro-sense" -exec test -d "{}/.git" \; -print -quit 2>/dev/null)
+    if [ -n "$found" ]; then
+        echo "$found"
         return 0
     fi
 
+    return 1
+}
+
+install_nekroctl() {
+    local nekro_dir="$1"
+    local nekroctl_src="$nekro_dir/tools/nekroctl.py"
+
+    if [ ! -f "$nekroctl_src" ]; then
+        log_error "nekroctl.py não encontrado em $nekro_dir/tools/"
+        return 1
+    fi
+
+    log_info "Instalando nekroctl em /usr/local/bin/..."
+    cp "$nekroctl_src" /usr/local/bin/nekroctl.py
+    chmod +x /usr/local/bin/nekroctl.py
+    log_info "nekroctl.py instalado em /usr/local/bin/"
+}
+
+install_nekro_sense() {
+    log_step "Instalando nekro-sense (módulo kernel + nekroctl)..."
+
     local real_user="${SUDO_USER:-$USER}"
     local real_home=$(eval echo "~$real_user")
-    local nekro_dir="$real_home/nekro-sense"
+    local nekro_dir
 
-    if [ -d "$nekro_dir" ]; then
-        log_info "Repositório encontrado em $nekro_dir, atualizando..."
+    if nekro_dir=$(find_nekro_dir); then
+        log_info "Repositório encontrado em $nekro_dir"
         cd "$nekro_dir"
         git pull --quiet 2>/dev/null || true
     else
-        log_info "Clonando repositório nekro-sense..."
+        nekro_dir="$real_home/nekro-sense"
+        log_info "Clonando repositório nekro-sense em $nekro_dir..."
         git clone --quiet "$NEKRO_REPO" "$nekro_dir"
         chown -R "$real_user":"$real_user" "$nekro_dir"
         cd "$nekro_dir"
     fi
 
-    log_info "Compilando módulo kernel..."
-    make clean 2>/dev/null || true
-    make
+    if ! lsmod | grep -q nekro_sense; then
+        log_info "Compilando módulo kernel..."
+        make clean 2>/dev/null || true
+        make
 
-    log_info "Instalando módulo..."
-    make install
+        log_info "Instalando módulo..."
+        make install
 
-    log_info "Carregando módulo..."
-    modprobe nekro_sense 2>/dev/null || {
-        log_warn "Não foi possível carregar o módulo automaticamente"
-        log_warn "Pode ser necessário reiniciar o sistema"
-    }
+        log_info "Carregando módulo..."
+        modprobe nekro_sense 2>/dev/null || {
+            log_warn "Não foi possível carregar o módulo automaticamente"
+            log_warn "Pode ser necessário reiniciar o sistema"
+        }
 
-    if lsmod | grep -q nekro_sense; then
-        log_info "nekro-sense carregado com sucesso"
+        if lsmod | grep -q nekro_sense; then
+            log_info "nekro-sense carregado com sucesso"
+        else
+            log_warn "Módulo instalado mas não carregado (reinicie o sistema)"
+        fi
     else
-        log_warn "Módulo instalado mas não carregado (reinicie o sistema)"
+        log_info "Módulo kernel já está carregado"
     fi
+
+    install_nekroctl "$nekro_dir"
 }
 
 install_fan_aggressor() {
     log_step "Instalando Fan Aggressor..."
 
-    local real_user="${SUDO_USER:-$USER}"
-    local real_home=$(eval echo "~$real_user")
-    local fan_dir="$real_home/fan-control"
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local fan_dir=""
 
-    if [ -d "$fan_dir" ]; then
-        log_info "Repositório encontrado em $fan_dir"
-        cd "$fan_dir"
-        git pull --quiet 2>/dev/null || true
+    if [ -f "$script_dir/install.sh" ] && [ -f "$script_dir/fan_aggressor.py" ]; then
+        fan_dir="$script_dir"
+        log_info "Usando repositório local: $fan_dir"
     else
-        log_info "Clonando repositório fan-control..."
-        git clone --quiet "$FAN_REPO" "$fan_dir"
-        chown -R "$real_user":"$real_user" "$fan_dir"
-        cd "$fan_dir"
+        local real_user="${SUDO_USER:-$USER}"
+        local real_home=$(eval echo "~$real_user")
+
+        local candidates=(
+            "$real_home/fan-control"
+            "$real_home/projetos/fan-control"
+            "$real_home/projects/fan-control"
+        )
+
+        for dir in "${candidates[@]}"; do
+            if [ -f "$dir/install.sh" ] && [ -f "$dir/fan_aggressor.py" ]; then
+                fan_dir="$dir"
+                break
+            fi
+        done
+
+        if [ -z "$fan_dir" ]; then
+            fan_dir="$real_home/fan-control"
+            log_info "Clonando repositório fan-control..."
+            git clone --quiet "$FAN_REPO" "$fan_dir"
+            chown -R "$real_user":"$real_user" "$fan_dir"
+        fi
+
+        log_info "Repositório encontrado em $fan_dir"
     fi
+
+    cd "$fan_dir"
 
     log_info "Executando install.sh..."
     bash "$fan_dir/install.sh"

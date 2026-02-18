@@ -58,10 +58,15 @@ def _is_nekroctl_path_allowed(path: str) -> bool:
 def _find_nekroctl_in_home() -> Optional[str]:
     import glob
     import re
-    for match in glob.glob("/home/*/nekro-sense/tools/nekroctl.py"):
-        resolved = str(Path(match).resolve())
-        if re.match(r"^/home/[a-zA-Z0-9_.-]+/nekro-sense/tools/nekroctl\.py$", resolved):
-            if os.access(resolved, os.X_OK):
+    patterns = [
+        "/home/*/nekro-sense/tools/nekroctl.py",
+        "/home/*/*/nekro-sense/tools/nekroctl.py",
+    ]
+    valid_re = re.compile(r"^/home/[a-zA-Z0-9_.-]+(/[a-zA-Z0-9_.-]+)?/nekro-sense/tools/nekroctl\.py$")
+    for pattern in patterns:
+        for match in glob.glob(pattern):
+            resolved = str(Path(match).resolve())
+            if valid_re.match(resolved) and os.access(resolved, os.X_OK):
                 return resolved
     return None
 
