@@ -850,16 +850,13 @@ class FanAggressorApp(Adw.Application):
             self.epp_row.set_selected(epp_list.index(current_epp))
 
         hw_pl1 = get_rapl_pl1_watts()
-        cfg_pl1 = self.config.get("cpu_rapl_pl1_w")
-        self.pl1_row.set_value(cfg_pl1 if cfg_pl1 is not None else (hw_pl1 or RAPL_PL1_MAX_W))
+        self.pl1_row.set_value(hw_pl1 if hw_pl1 is not None else (self.config.get("cpu_rapl_pl1_w") or RAPL_PL1_MAX_W))
 
         hw_pl2 = get_rapl_pl2_watts()
-        cfg_pl2 = self.config.get("cpu_rapl_pl2_w")
-        self.pl2_row.set_value(cfg_pl2 if cfg_pl2 is not None else (hw_pl2 or 157))
+        self.pl2_row.set_value(hw_pl2 if hw_pl2 is not None else (self.config.get("cpu_rapl_pl2_w") or 157))
 
         hw_freq = get_cpu_max_freq_mhz()
-        cfg_freq = self.config.get("cpu_max_freq_mhz")
-        current_freq = cfg_freq if cfg_freq is not None else (hw_freq or CPU_FREQ_MAX_MHZ)
+        current_freq = hw_freq if hw_freq is not None else (self.config.get("cpu_max_freq_mhz") or CPU_FREQ_MAX_MHZ)
         closest_idx = min(range(len(FREQ_OPTIONS_MHZ)), key=lambda i: abs(FREQ_OPTIONS_MHZ[i] - current_freq))
         self.freq_row.set_selected(closest_idx)
 

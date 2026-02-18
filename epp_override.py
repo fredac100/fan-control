@@ -9,6 +9,9 @@ PLATFORM_PROFILE = Path("/sys/firmware/acpi/platform_profile")
 EPP_CPU0 = Path("/sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference")
 NO_TURBO = Path("/sys/devices/system/cpu/intel_pstate/no_turbo")
 CPU_BASE = Path("/sys/devices/system/cpu")
+RAPL_PL1 = Path("/sys/class/powercap/intel-rapl:0/constraint_0_power_limit_uw")
+RAPL_PL2 = Path("/sys/class/powercap/intel-rapl:0/constraint_1_power_limit_uw")
+SCALING_MAX_FREQ = "cpufreq/scaling_max_freq"
 
 PROFILE_TO_EPP = {
     "low-power": "power",
@@ -32,6 +35,22 @@ PROFILE_GOVERNOR = {
     "balanced": "powersave",
     "balanced-performance": "powersave",
     "performance": "performance",
+}
+
+PROFILE_RAPL = {
+    "low-power": (15, 20),
+    "quiet": (25, 35),
+    "balanced": (45, 65),
+    "balanced-performance": (65, 100),
+    "performance": (125, 157),
+}
+
+PROFILE_MAX_FREQ_MHZ = {
+    "low-power": 2000,
+    "quiet": 3200,
+    "balanced": 4400,
+    "balanced-performance": 5300,
+    "performance": 5500,
 }
 
 SCALING_GOVERNOR = "cpufreq/scaling_governor"
@@ -94,6 +113,50 @@ def set_governor(value: str) -> bool:
     return success
 
 
+def get_rapl() -> tuple:
+    pl1, pl2 = None, None
+    try:
+        pl1 = int(RAPL_PL1.read_text().strip()) // 1_000_000
+    except (FileNotFoundError, PermissionError, OSError, ValueError):
+        pass
+    try:
+        pl2 = int(RAPL_PL2.read_text().strip()) // 1_000_000
+    except (FileNotFoundError, PermissionError, OSError, ValueError):
+        pass
+    return (pl1, pl2)
+
+
+def set_rapl(pl1_w: int, pl2_w: int) -> bool:
+    success = True
+    try:
+        RAPL_PL1.write_text(str(pl1_w * 1_000_000))
+    except (PermissionError, OSError):
+        success = False
+    try:
+        RAPL_PL2.write_text(str(pl2_w * 1_000_000))
+    except (PermissionError, OSError):
+        success = False
+    return success
+
+
+def get_max_freq() -> int:
+    try:
+        return int((CPU_BASE / "cpu0" / SCALING_MAX_FREQ).read_text().strip()) // 1000
+    except (FileNotFoundError, PermissionError, OSError, ValueError):
+        return 0
+
+
+def set_max_freq(mhz: int) -> bool:
+    khz = str(mhz * 1000)
+    success = True
+    for freq_file in sorted(CPU_BASE.glob(f"cpu[0-9]*/{SCALING_MAX_FREQ}")):
+        try:
+            freq_file.write_text(khz)
+        except (PermissionError, OSError):
+            success = False
+    return success
+
+
 def main():
     running = True
 
@@ -117,6 +180,8 @@ def main():
         expected_epp = PROFILE_TO_EPP.get(profile)
         expected_turbo = PROFILE_TURBO.get(profile)
         expected_gov = PROFILE_GOVERNOR.get(profile)
+        expected_rapl = PROFILE_RAPL.get(profile)
+        expected_freq = PROFILE_MAX_FREQ_MHZ.get(profile)
 
         if expected_epp or expected_turbo is not None or expected_gov:
             profile_changed = profile != last_profile
@@ -126,6 +191,8 @@ def main():
             current_epp = read_epp()
             current_turbo = get_turbo()
             current_gov = get_governor()
+            current_rapl = get_rapl()
+            current_freq = get_max_freq()
 
             changed = []
 
@@ -148,13 +215,26 @@ def main():
                 else:
                     changed.append(f"EPP: falha")
 
-            current_state = (current_gov, current_epp, current_turbo)
+            if profile_changed and expected_rapl and current_rapl != expected_rapl:
+                if set_rapl(*expected_rapl):
+                    changed.append(f"TDP: PL1={expected_rapl[0]}W PL2={expected_rapl[1]}W")
+                else:
+                    changed.append(f"TDP: falha")
+
+            if profile_changed and expected_freq and current_freq != expected_freq:
+                if set_max_freq(expected_freq):
+                    changed.append(f"MaxFreq: {current_freq} -> {expected_freq}MHz")
+                else:
+                    changed.append(f"MaxFreq: falha")
+
+            current_state = (current_gov, current_epp, current_turbo, current_rapl, current_freq)
             if changed:
                 print(f"[{profile}] {', '.join(changed)}")
                 last_log[profile] = current_state
             elif profile_changed and last_log.get(profile) != current_state:
                 turbo_state = "ON" if current_turbo else "OFF"
-                print(f"[{profile}] Gov={current_gov}, EPP={current_epp}, Turbo={turbo_state}")
+                pl1, pl2 = current_rapl
+                print(f"[{profile}] Gov={current_gov}, EPP={current_epp}, Turbo={turbo_state}, PL1={pl1}W, PL2={pl2}W, Freq={current_freq}MHz")
                 last_log[profile] = current_state
 
         last_profile = profile

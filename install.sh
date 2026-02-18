@@ -66,6 +66,7 @@ After=power-profiles-daemon.service
 
 [Service]
 Type=simple
+Environment=PYTHONUNBUFFERED=1
 ExecStart=/usr/local/bin/epp_override
 Restart=on-failure
 RestartSec=3
