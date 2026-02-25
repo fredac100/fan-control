@@ -77,7 +77,9 @@ def load_config() -> Dict[str, Any]:
         "failsafe_mode": "auto",
         "cpu_rapl_pl1_w": None,
         "cpu_rapl_pl2_w": None,
-        "cpu_max_freq_mhz": None
+        "cpu_max_freq_mhz": None,
+        "cpu_fan_fixed_offset": 0,
+        "gpu_fan_fixed_offset": 0
     }
     if CONFIG_FILE.exists():
         try:
@@ -186,7 +188,7 @@ class FanAggressorApp(Adw.Application):
     def _build_window(self) -> Adw.ApplicationWindow:
         win = Adw.ApplicationWindow(application=self)
         win.set_title("Fan Aggressor")
-        win.set_default_size(850, 1015)
+        win.set_default_size(850, 1075)
         win.set_resizable(True)
 
         icon_theme = Gtk.IconTheme.get_for_display(win.get_display())
@@ -350,6 +352,26 @@ class FanAggressorApp(Adw.Application):
         )
         self.gpu_offset_row.connect("notify::value", self._on_gpu_offset_changed)
         group.add(self.gpu_offset_row)
+
+        self.cpu_fixed_offset_row = Adw.SpinRow(
+            title="CPU Fixed Offset",
+            adjustment=Gtk.Adjustment(
+                lower=0, upper=95, step_increment=5, page_increment=10,
+                value=self.config.get("cpu_fan_fixed_offset", 0)
+            )
+        )
+        self.cpu_fixed_offset_row.connect("notify::value", self._on_cpu_fixed_offset_changed)
+        group.add(self.cpu_fixed_offset_row)
+
+        self.gpu_fixed_offset_row = Adw.SpinRow(
+            title="GPU Fixed Offset",
+            adjustment=Gtk.Adjustment(
+                lower=0, upper=95, step_increment=5, page_increment=10,
+                value=self.config.get("gpu_fan_fixed_offset", 0)
+            )
+        )
+        self.gpu_fixed_offset_row.connect("notify::value", self._on_gpu_fixed_offset_changed)
+        group.add(self.gpu_fixed_offset_row)
 
         self._sync_link_visibility()
 
@@ -698,10 +720,13 @@ class FanAggressorApp(Adw.Application):
     def _sync_link_visibility(self):
         linked = self.link_offsets.get_active()
         self.gpu_offset_row.set_visible(not linked)
+        self.gpu_fixed_offset_row.set_visible(not linked)
         if linked:
             self.cpu_offset_row.set_title("Fan Offset (Both)")
+            self.cpu_fixed_offset_row.set_title("Fixed Offset (Both)")
         else:
             self.cpu_offset_row.set_title("CPU Offset")
+            self.cpu_fixed_offset_row.set_title("CPU Fixed Offset")
 
     def _on_link_changed(self, row, _):
         if self.updating:
@@ -711,21 +736,78 @@ class FanAggressorApp(Adw.Application):
         if self.link_offsets.get_active():
             self.updating = True
             self.gpu_offset_row.set_value(self.cpu_offset_row.get_value())
+            self.gpu_fixed_offset_row.set_value(self.cpu_fixed_offset_row.get_value())
             self.updating = False
             self.config["gpu_fan_offset"] = int(self.cpu_offset_row.get_value())
+            self.config["gpu_fan_fixed_offset"] = int(self.cpu_fixed_offset_row.get_value())
         self._save_config()
+
+    def _clamp_fixed_to_main(self, fixed_row, main_val):
+        fixed_val = int(fixed_row.get_value())
+        if main_val <= 5:
+            if fixed_val > 0:
+                self.updating = True
+                fixed_row.set_value(0)
+                self.updating = False
+        elif fixed_val >= main_val:
+            self.updating = True
+            fixed_row.set_value(max(0, main_val - 5))
+            self.updating = False
 
     def _on_cpu_offset_changed(self, row, _):
         if self.updating:
             return
+        main_val = int(row.get_value())
+        self._clamp_fixed_to_main(self.cpu_fixed_offset_row, main_val)
         if self.link_offsets.get_active():
             self.updating = True
             self.gpu_offset_row.set_value(row.get_value())
             self.updating = False
+            self._clamp_fixed_to_main(self.gpu_fixed_offset_row, main_val)
         self._on_config_changed(None, None)
 
     def _on_gpu_offset_changed(self, row, _):
         if self.updating:
+            return
+        main_val = int(row.get_value())
+        self._clamp_fixed_to_main(self.gpu_fixed_offset_row, main_val)
+        self._on_config_changed(None, None)
+
+    def _on_cpu_fixed_offset_changed(self, row, _):
+        if self.updating:
+            return
+        fixed_val = int(row.get_value())
+        main_val = int(self.cpu_offset_row.get_value())
+        if main_val <= 5 and fixed_val > 0:
+            self.updating = True
+            row.set_value(0)
+            self.updating = False
+            return
+        if fixed_val >= main_val:
+            self.updating = True
+            row.set_value(max(0, main_val - 5))
+            self.updating = False
+            return
+        if self.link_offsets.get_active():
+            self.updating = True
+            self.gpu_fixed_offset_row.set_value(row.get_value())
+            self.updating = False
+        self._on_config_changed(None, None)
+
+    def _on_gpu_fixed_offset_changed(self, row, _):
+        if self.updating:
+            return
+        fixed_val = int(row.get_value())
+        main_val = int(self.gpu_offset_row.get_value())
+        if main_val <= 5 and fixed_val > 0:
+            self.updating = True
+            row.set_value(0)
+            self.updating = False
+            return
+        if fixed_val >= main_val:
+            self.updating = True
+            row.set_value(max(0, main_val - 5))
+            self.updating = False
             return
         self._on_config_changed(None, None)
 
@@ -740,6 +822,8 @@ class FanAggressorApp(Adw.Application):
         self.config["hybrid_mode"] = self.hybrid_row.get_active()
         self.config["cpu_fan_offset"] = int(self.cpu_offset_row.get_value())
         self.config["gpu_fan_offset"] = int(self.gpu_offset_row.get_value())
+        self.config["cpu_fan_fixed_offset"] = int(self.cpu_fixed_offset_row.get_value())
+        self.config["gpu_fan_fixed_offset"] = int(self.gpu_fixed_offset_row.get_value())
         self.config["temp_threshold_engage"] = int(self.engage_row.get_value())
         self.config["temp_threshold_disengage"] = int(self.disengage_row.get_value())
 
@@ -810,6 +894,8 @@ class FanAggressorApp(Adw.Application):
         self.engage_row.set_value(self.config.get("temp_threshold_engage", 70))
         self.disengage_row.set_value(self.config.get("temp_threshold_disengage", 65))
         self.link_offsets.set_active(self.config.get("link_offsets", True))
+        self.cpu_fixed_offset_row.set_value(self.config.get("cpu_fan_fixed_offset", 0))
+        self.gpu_fixed_offset_row.set_value(self.config.get("gpu_fan_fixed_offset", 0))
 
         gov_list = get_available_governors() or ["powersave", "performance"]
         config_gov = self.config.get("cpu_governor", "powersave")
@@ -856,10 +942,14 @@ class FanAggressorApp(Adw.Application):
 
         state = get_state()
         if state and state.get("active"):
+            mode = state.get("mode", "boost")
             offset = state.get("cpu_offset", 0)
             base = state.get("base_cpu", 0)
             total = min(100, base + offset)
-            self.boost_label.set_text(f"Active: base {base}% + offset {offset}% = {total}%")
+            if mode == "fixed":
+                self.boost_label.set_text(f"Fixed: base {base}% + fixed {offset}% = {total}%")
+            else:
+                self.boost_label.set_text(f"Active: base {base}% + offset {offset}% = {total}%")
             self.boost_label.remove_css_class("dim-label")
             self.boost_label.add_css_class("accent")
         else:

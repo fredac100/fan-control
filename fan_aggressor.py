@@ -109,14 +109,15 @@ def set_fan_auto(nekroctl: str) -> bool:
         return False
 
 
-def write_state(active: bool, cpu_offset: int = 0, gpu_offset: int = 0, base_cpu: int = 0, base_gpu: int = 0):
+def write_state(active: bool, cpu_offset: int = 0, gpu_offset: int = 0, base_cpu: int = 0, base_gpu: int = 0, mode: str = "boost"):
     try:
         state = {
             "active": active,
             "cpu_offset": cpu_offset,
             "gpu_offset": gpu_offset,
             "base_cpu": base_cpu,
-            "base_gpu": base_gpu
+            "base_gpu": base_gpu,
+            "mode": mode
         }
         fd = os.open(str(STATE_FILE), os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o644)
         with os.fdopen(fd, 'w') as f:
@@ -174,6 +175,9 @@ class FanAggressor:
         self.snapshot_gpu = 0
         self.snapshot_temp = 0
         self.fan_failures = 0
+        self.is_fixed_offset_active = False
+        self.fixed_base_cpu = 0
+        self.fixed_base_gpu = 0
         self.nekroctl_path = _find_nekroctl(self.config)
         self.nekroctl_missing_logged = False
 
@@ -194,7 +198,9 @@ class FanAggressor:
             "failsafe_mode": "auto",
             "cpu_rapl_pl1_w": None,
             "cpu_rapl_pl2_w": None,
-            "cpu_max_freq_mhz": None
+            "cpu_max_freq_mhz": None,
+            "cpu_fan_fixed_offset": 0,
+            "gpu_fan_fixed_offset": 0
         }
         if self.config_path.exists():
             try:
@@ -221,6 +227,19 @@ class FanAggressor:
         config["gpu_fan_offset"] = self._safe_int(config.get("gpu_fan_offset"), 0)
         config["cpu_fan_offset"] = max(-100, min(100, config["cpu_fan_offset"]))
         config["gpu_fan_offset"] = max(-100, min(100, config["gpu_fan_offset"]))
+
+        config["cpu_fan_fixed_offset"] = self._safe_int(config.get("cpu_fan_fixed_offset"), 0)
+        config["gpu_fan_fixed_offset"] = self._safe_int(config.get("gpu_fan_fixed_offset"), 0)
+        config["cpu_fan_fixed_offset"] = max(0, min(95, config["cpu_fan_fixed_offset"]))
+        config["gpu_fan_fixed_offset"] = max(0, min(95, config["gpu_fan_fixed_offset"]))
+        if config["cpu_fan_offset"] <= 0:
+            config["cpu_fan_fixed_offset"] = 0
+        elif config["cpu_fan_fixed_offset"] >= config["cpu_fan_offset"]:
+            config["cpu_fan_fixed_offset"] = max(0, config["cpu_fan_offset"] - 5)
+        if config["gpu_fan_offset"] <= 0:
+            config["gpu_fan_fixed_offset"] = 0
+        elif config["gpu_fan_fixed_offset"] >= config["gpu_fan_offset"]:
+            config["gpu_fan_fixed_offset"] = max(0, config["gpu_fan_offset"] - 5)
 
         try:
             poll_interval = float(config.get("poll_interval", 1.0))
@@ -322,6 +341,12 @@ class FanAggressor:
         print(f"\nOffsets configurados:")
         print(f"  CPU: {self.config['cpu_fan_offset']:+d}%")
         print(f"  GPU: {self.config['gpu_fan_offset']:+d}%")
+        cpu_fixed = self.config.get('cpu_fan_fixed_offset', 0)
+        gpu_fixed = self.config.get('gpu_fan_fixed_offset', 0)
+        if cpu_fixed > 0 or gpu_fixed > 0:
+            print(f"\nFixed Offsets:")
+            print(f"  CPU: {cpu_fixed}%")
+            print(f"  GPU: {gpu_fixed}%")
 
         if hybrid:
             print(f"\nThresholds (modo hibrido):")
@@ -431,6 +456,8 @@ class FanAggressor:
         print(f"Fan Aggressor iniciado ({'HIBRIDO' if hybrid else 'CURVA FIXA'})")
         print(f"CPU offset: {self.config['cpu_fan_offset']:+d}%")
         print(f"GPU offset: {self.config['gpu_fan_offset']:+d}%")
+        print(f"CPU fixed offset: {self.config.get('cpu_fan_fixed_offset', 0)}%")
+        print(f"GPU fixed offset: {self.config.get('gpu_fan_fixed_offset', 0)}%")
 
         apply_cpu_power(self.config)
         self.last_cpu_power = self._get_cpu_power_state()
@@ -475,6 +502,7 @@ class FanAggressor:
                         self.last_cpu = -1
                         self.last_gpu = -1
                         self.is_boosting = False
+                        self.is_fixed_offset_active = False
                         self.fan_failures = 0
                     time.sleep(1)
                     continue
@@ -510,29 +538,50 @@ class FanAggressor:
                     threshold_disengage = threshold_engage - 5
 
                 if hybrid:
+                    cpu_fixed_offset = self.config.get("cpu_fan_fixed_offset", 0)
+                    gpu_fixed_offset = self.config.get("gpu_fan_fixed_offset", 0)
+                    has_fixed = cpu_fixed_offset > 0 or gpu_fixed_offset > 0
+
+                    if not self.is_boosting and self.last_cpu != -1 and not has_fixed:
+                        set_fan_auto(self.nekroctl_path)
+                        clear_state()
+                        self.last_cpu = -1
+                        self.last_gpu = -1
+                        self.is_fixed_offset_active = False
+                        print("Fixed offset removido, voltando ao AUTO")
+
                     if not self.is_boosting and temp >= threshold_engage:
-                        speeds = self.monitor.get_fan_speeds()
-                        self.snapshot_cpu = rpm_to_duty(speeds.get('fan1', 0)) if speeds else 0
-                        self.snapshot_gpu = rpm_to_duty(speeds.get('fan2', 0)) if speeds else 0
+                        if self.is_fixed_offset_active:
+                            self.snapshot_cpu = self.fixed_base_cpu
+                            self.snapshot_gpu = self.fixed_base_gpu
+                        else:
+                            speeds = self.monitor.get_fan_speeds()
+                            self.snapshot_cpu = rpm_to_duty(speeds.get('fan1', 0)) if speeds else 0
+                            self.snapshot_gpu = rpm_to_duty(speeds.get('fan2', 0)) if speeds else 0
                         self.snapshot_temp = temp
                         self.is_boosting = True
+                        self.is_fixed_offset_active = False
                         cpu_t = cg_temps.get("cpu")
                         gpu_t = cg_temps.get("gpu")
                         temp_str = f"CPU {cpu_t:.0f}°C / GPU {gpu_t:.0f}°C" if cpu_t is not None and gpu_t is not None else f"{temp:.0f}°C"
-                        print(f"[{temp_str}] Offset ATIVADO (base snapshot: CPU {self.snapshot_cpu}%, GPU {self.snapshot_gpu}%)")
+                        print(f"[{temp_str}] Boost ATIVADO (base snapshot: CPU {self.snapshot_cpu}%, GPU {self.snapshot_gpu}%)")
                     elif self.is_boosting and temp < threshold_disengage:
                         self.is_boosting = False
                         self.snapshot_cpu = 0
                         self.snapshot_gpu = 0
                         self.snapshot_temp = 0
-                        set_fan_auto(self.nekroctl_path)
+                        if not has_fixed:
+                            set_fan_auto(self.nekroctl_path)
                         clear_state()
                         self.last_cpu = -1
                         self.last_gpu = -1
                         cpu_t = cg_temps.get("cpu")
                         gpu_t = cg_temps.get("gpu")
                         temp_str = f"CPU {cpu_t:.0f}°C / GPU {gpu_t:.0f}°C" if cpu_t is not None and gpu_t is not None else f"{temp:.0f}°C"
-                        print(f"[{temp_str}] Offset DESATIVADO, voltando ao AUTO")
+                        if has_fixed:
+                            print(f"[{temp_str}] Boost DESATIVADO, voltando ao fixed offset")
+                        else:
+                            print(f"[{temp_str}] Boost DESATIVADO, voltando ao AUTO")
                         time.sleep(self.config["poll_interval"])
                         continue
                     if self.is_boosting:
@@ -552,6 +601,26 @@ class FanAggressor:
                             else:
                                 self.fan_failures += 1
                                 print("Falha ao setar fans")
+                    elif has_fixed:
+                        base = temp_to_duty(temp)
+                        new_cpu = max(0, min(100, base + cpu_fixed_offset))
+                        new_gpu = max(0, min(100, base + gpu_fixed_offset))
+                        self.fixed_base_cpu = base
+                        self.fixed_base_gpu = base
+                        self.is_fixed_offset_active = True
+                        if new_cpu != self.last_cpu or new_gpu != self.last_gpu:
+                            if set_fan_speed(self.nekroctl_path, new_cpu, new_gpu):
+                                self.fan_failures = 0
+                                write_state(True, cpu_fixed_offset, gpu_fixed_offset, base, base, mode="fixed")
+                                self.last_cpu = new_cpu
+                                self.last_gpu = new_gpu
+                                cpu_t = cg_temps.get("cpu")
+                                gpu_t = cg_temps.get("gpu")
+                                temp_str = f"CPU {cpu_t:.0f}°C / GPU {gpu_t:.0f}°C" if cpu_t is not None and gpu_t is not None else f"{temp:.0f}°C"
+                                print(f"[{temp_str}] Fixed: CPU {new_cpu}% (base {base}% + {cpu_fixed_offset}%), GPU {new_gpu}% (base {base}% + {gpu_fixed_offset}%)")
+                            else:
+                                self.fan_failures += 1
+                                print("Falha ao setar fans (fixed offset)")
                     else:
                         time.sleep(self.config["poll_interval"])
                         continue
@@ -577,6 +646,7 @@ class FanAggressor:
                     self.last_cpu = -1
                     self.last_gpu = -1
                     self.is_boosting = False
+                    self.is_fixed_offset_active = False
                     self.fan_failures = 0
                     time.sleep(5)
                     continue
