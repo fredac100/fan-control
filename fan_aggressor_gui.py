@@ -35,6 +35,7 @@ from cpu_power import (
     get_rapl_pl1_watts, get_rapl_pl2_watts,
     get_cpu_max_freq_mhz, get_cpu_hw_max_freq_mhz,
     set_rapl_pl1, set_rapl_pl2, set_cpu_max_freq,
+    save_kb_state, reset_kb_brightness, restore_kb_state,
     RAPL_PL1_MIN_W, RAPL_PL1_MAX_W,
     RAPL_PL2_MIN_W, RAPL_PL2_MAX_W,
     CPU_FREQ_MIN_MHZ, CPU_FREQ_MAX_MHZ,
@@ -174,6 +175,7 @@ class FanAggressorApp(Adw.Application):
         self.config = load_config()
         self.updating = False
         self.refresh_timeout_id = None
+        self._kb_restore_retries = 0
 
     def do_activate(self):
         win = self.props.active_window
@@ -512,6 +514,15 @@ class FanAggressorApp(Adw.Application):
         self._update_profile_indicator()
 
     def _on_profile_clicked(self, button, profile_id, settings):
+        current_pp = get_platform_profile()
+        target_pp = settings.get("cpu_platform_profile", "")
+
+        entering_low_power = (target_pp == "low-power")
+        leaving_low_power = (current_pp == "low-power" and target_pp != "low-power")
+
+        if entering_low_power:
+            save_kb_state()
+
         self.updating = True
         for key, value in settings.items():
             self.config[key] = value
@@ -545,6 +556,28 @@ class FanAggressorApp(Adw.Application):
         self._save_config()
         self._apply_cpu_power()
         self._update_profile_indicator()
+
+        if leaving_low_power:
+            self._schedule_kb_restore()
+
+    def _schedule_kb_restore(self):
+        self._kb_restore_retries = 0
+        GLib.timeout_add(800, self._try_restore_kb)
+
+    def _try_restore_kb(self):
+        self._kb_restore_retries += 1
+        if self._kb_restore_retries > 10:
+            return False
+        current_pp = get_platform_profile()
+        if current_pp == "low-power":
+            return True
+        reset_kb_brightness()
+        GLib.timeout_add(300, self._finish_restore_kb)
+        return False
+
+    def _finish_restore_kb(self):
+        restore_kb_state()
+        return False
 
     def _update_profile_indicator(self):
         current_gov = get_current_governor()
@@ -586,6 +619,10 @@ class FanAggressorApp(Adw.Application):
         if self.updating:
             return
 
+        leaving_low_power = (get_platform_profile() == "low-power")
+        if leaving_low_power:
+            save_kb_state()
+
         gov_idx = self.governor_row.get_selected()
         gov_item = self.governor_items.get_string(gov_idx)
         if gov_item:
@@ -617,6 +654,9 @@ class FanAggressorApp(Adw.Application):
         self._save_config()
         self._apply_cpu_power()
         self._update_profile_indicator()
+
+        if leaving_low_power:
+            self._schedule_kb_restore()
 
     def _apply_cpu_power(self):
         gov = self.config.get("cpu_governor")
@@ -850,14 +890,13 @@ class FanAggressorApp(Adw.Application):
             self.epp_row.set_selected(epp_list.index(current_epp))
 
         hw_pl1 = get_rapl_pl1_watts()
-        self.pl1_row.set_value(hw_pl1 if hw_pl1 is not None else (self.config.get("cpu_rapl_pl1_w") or RAPL_PL1_MAX_W))
+        self.pl1_row.set_value(hw_pl1 if hw_pl1 is not None else RAPL_PL1_MAX_W)
 
         hw_pl2 = get_rapl_pl2_watts()
-        self.pl2_row.set_value(hw_pl2 if hw_pl2 is not None else (self.config.get("cpu_rapl_pl2_w") or 157))
+        self.pl2_row.set_value(hw_pl2 if hw_pl2 is not None else 157)
 
-        hw_freq = get_cpu_max_freq_mhz()
-        current_freq = hw_freq if hw_freq is not None else (self.config.get("cpu_max_freq_mhz") or CPU_FREQ_MAX_MHZ)
-        closest_idx = min(range(len(FREQ_OPTIONS_MHZ)), key=lambda i: abs(FREQ_OPTIONS_MHZ[i] - current_freq))
+        hw_freq = get_cpu_max_freq_mhz() or CPU_FREQ_MAX_MHZ
+        closest_idx = min(range(len(FREQ_OPTIONS_MHZ)), key=lambda i: abs(FREQ_OPTIONS_MHZ[i] - hw_freq))
         self.freq_row.set_selected(closest_idx)
 
         self.updating = False

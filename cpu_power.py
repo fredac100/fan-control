@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 
 import glob
+import json
+import os
+import re
+import tempfile
 from pathlib import Path
 from typing import List, Optional
 
@@ -31,6 +35,12 @@ EPP_TO_PROFILE = {
     "performance": "performance",
     "default": "balanced",
 }
+
+KB_PER_ZONE = "/sys/devices/platform/acer-wmi/four_zoned_kb/per_zone_mode"
+KB_FOUR_MODE = "/sys/devices/platform/acer-wmi/four_zoned_kb/four_zone_mode"
+BACKLIGHT_TIMEOUT = "/sys/devices/platform/acer-wmi/predator_sense/backlight_timeout"
+KB_STATE_FILE = str(Path.home() / ".config" / "fan-aggressor" / "kb_state.json")
+_PER_ZONE_RE = re.compile(r"^\d+(,\d+){4}$")
 
 
 def _cpu_dirs() -> List[Path]:
@@ -183,6 +193,60 @@ def set_cpu_max_freq(mhz: int) -> bool:
         if not _write_sysfs(str(cpu / SCALING_MAX_FREQ_ATTR), khz):
             success = False
     return success
+
+
+def get_kb_state() -> Optional[dict]:
+    per_zone = _read_sysfs(KB_PER_ZONE)
+    four_mode = _read_sysfs(KB_FOUR_MODE)
+    if per_zone is None and four_mode is None:
+        return None
+    return {"per_zone_mode": per_zone, "four_zone_mode": four_mode}
+
+
+def save_kb_state() -> bool:
+    state = get_kb_state()
+    if not state:
+        return False
+    path = Path(KB_STATE_FILE)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".kb_state_")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(state, f)
+            os.replace(tmp, path)
+        except Exception:
+            os.unlink(tmp)
+            raise
+        return True
+    except (PermissionError, OSError):
+        return False
+
+
+def load_kb_state() -> Optional[dict]:
+    try:
+        with open(KB_STATE_FILE) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, PermissionError, OSError):
+        return None
+
+
+def reset_kb_brightness() -> None:
+    _write_sysfs(BACKLIGHT_TIMEOUT, "-1")
+    per_zone = _read_sysfs(KB_PER_ZONE)
+    if per_zone and _PER_ZONE_RE.match(per_zone):
+        parts = per_zone.split(",")
+        _write_sysfs(KB_PER_ZONE, ",".join(parts[:4] + ["0"]))
+
+
+def restore_kb_state() -> bool:
+    state = load_kb_state()
+    if not state:
+        return False
+    per_zone = state.get("per_zone_mode", "")
+    if per_zone and _PER_ZONE_RE.match(per_zone):
+        return _write_sysfs(KB_PER_ZONE, per_zone)
+    return False
 
 
 def apply_cpu_power(config: dict) -> None:
