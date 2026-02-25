@@ -947,7 +947,7 @@ class FanAggressorApp(Adw.Application):
             base = state.get("base_cpu", 0)
             total = min(100, base + offset)
             if mode == "fixed":
-                self.boost_label.set_text(f"Fixed: base {base}% + fixed {offset}% = {total}%")
+                self.boost_label.set_text(f"Curve base {base}% + fixed {offset}% = {total}%")
             else:
                 self.boost_label.set_text(f"Active: base {base}% + offset {offset}% = {total}%")
             self.boost_label.remove_css_class("dim-label")
